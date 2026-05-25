@@ -29,7 +29,21 @@ export class ProjectController {
             }
 
             console.log('[ProjectController] Retrieved projects:', projects?.length || 0);
-            res.json(projects || []);
+
+            // Transform to frontend format
+            const transformedProjects = (projects || []).map(project => ({
+                id: project.id,
+                title: project.title,
+                slug: project.slug,
+                oneLineSummary: project.one_line_summary,
+                introduction: project.introduction,
+                description: project.description,
+                status: project.status,
+                createdAt: project.created_at,
+                updatedAt: project.updated_at
+            }));
+
+            res.json(transformedProjects);
         } catch (error) {
             console.error('[ProjectController] Error getting projects:', error);
             res.status(500).json({ error: 'Internal server error' });
@@ -71,7 +85,21 @@ export class ProjectController {
             }
 
             console.log('[ProjectController] Created project:', project.id);
-            res.status(201).json(project);
+
+            // Transform to frontend format
+            const transformedProject = {
+                id: project.id,
+                title: project.title,
+                slug: project.slug,
+                oneLineSummary: project.one_line_summary,
+                introduction: project.introduction,
+                description: project.description,
+                status: project.status,
+                createdAt: project.created_at,
+                updatedAt: project.updated_at
+            };
+
+            res.status(201).json(transformedProject);
         } catch (error) {
             console.error('[ProjectController] Error creating project:', error);
             res.status(500).json({ error: 'Internal server error' });
@@ -95,7 +123,20 @@ export class ProjectController {
                 return res.status(404).json({ error: 'Project not found' });
             }
 
-            res.json(project);
+            // Transform to frontend format
+            const transformedProject = {
+                id: project.id,
+                title: project.title,
+                slug: project.slug,
+                oneLineSummary: project.one_line_summary,
+                introduction: project.introduction,
+                description: project.description,
+                status: project.status,
+                createdAt: project.created_at,
+                updatedAt: project.updated_at
+            };
+
+            res.json(transformedProject);
         } catch (error) {
             console.error('[ProjectController] Error getting project:', error);
             res.status(500).json({ error: 'Internal server error' });
@@ -133,7 +174,21 @@ export class ProjectController {
             }
 
             console.log('[ProjectController] Updated project:', project.id);
-            res.json(project);
+
+            // Transform to frontend format
+            const transformedProject = {
+                id: project.id,
+                title: project.title,
+                slug: project.slug,
+                oneLineSummary: project.one_line_summary,
+                introduction: project.introduction,
+                description: project.description,
+                status: project.status,
+                createdAt: project.created_at,
+                updatedAt: project.updated_at
+            };
+
+            res.json(transformedProject);
         } catch (error) {
             console.error('[ProjectController] Error updating project:', error);
             res.status(500).json({ error: 'Internal server error' });
