@@ -5,7 +5,7 @@ WORKDIR /app
 
 # Copy package files and install dependencies
 COPY package*.json ./
-RUN npm install --omit=dev
+RUN npm install
 
 # Copy source and build
 COPY . .
@@ -23,9 +23,12 @@ RUN apk add --no-cache curl
 RUN addgroup -g 1001 -S nodejs
 RUN adduser -S nodeuser -u 1001
 
-# Copy built application and node_modules
+# Install production dependencies only
+COPY package*.json ./
+RUN npm install --omit=dev
+
+# Copy built application
 COPY --from=build --chown=nodeuser:nodejs /app/dist ./dist
-COPY --from=build --chown=nodeuser:nodejs /app/node_modules ./node_modules
 COPY --from=build --chown=nodeuser:nodejs /app/package.json ./
 
 USER nodeuser
