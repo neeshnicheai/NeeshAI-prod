@@ -32,6 +32,15 @@ app.get('/api/projects/:id', (req, res) => projectController.getProject(req, res
 app.put('/api/projects/:id', (req, res) => projectController.updateProject(req, res));
 app.delete('/api/projects/:id', (req, res) => projectController.deleteProject(req, res));
 
+// Document API routes
+import { DocumentController, uploadMiddleware } from './controllers/DocumentController';
+const documentController = new DocumentController();
+
+app.get('/api/documents/project/:projectId', (req, res) => documentController.getProjectDocuments(req, res));
+app.post('/api/documents/project/:projectId', uploadMiddleware, (req, res) => documentController.uploadDocument(req, res));
+app.put('/api/documents/:documentId/replace', uploadMiddleware, (req, res) => documentController.replaceDocument(req, res));
+app.post('/api/documents/project/:projectId/refresh', (req, res) => documentController.refreshDocuments(req, res));
+
 // Public health check endpoint
 app.get('/', (req, res) => {
     res.json({
