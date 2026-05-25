@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { supabase } from '../config/supabase';
+import { randomUUID } from 'crypto';
 
 interface CreateProjectRequest {
     title: string;
@@ -61,7 +62,7 @@ export class ProjectController {
             }
 
             const projectData = {
-                // Don't include id - let database auto-generate it
+                id: randomUUID(), // Generate UUID in backend
                 owner_id: req.user?.id,
                 title,
                 one_line_summary: oneLineSummary,
@@ -69,8 +70,9 @@ export class ProjectController {
                 description: description || null,
                 status: 'draft',
                 slug: `${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Date.now()}`,
-                deleted: false
-                // Don't include created_at/updated_at - let database use defaults
+                deleted: false,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
             };
 
             const { data: project, error } = await supabase
