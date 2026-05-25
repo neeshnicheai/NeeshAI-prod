@@ -62,7 +62,7 @@ class ChatControllerIntegrationTest {
                 .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("Validation Failed"))
-                .andExpected(jsonPath("$.details").exists());
+                .andExpect(jsonPath("$.details").exists());
     }
 
     @Test
@@ -112,22 +112,22 @@ class ChatControllerIntegrationTest {
     void healthCheck_ShouldReturnOk() throws Exception {
         // When & Then
         mockMvc.perform(get("/actuator/health"))
-                .andExpected(status().isOk())
-                .andExpected(jsonPath("$.status").value("UP"));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("UP"));
     }
 
     @Test
     void swaggerUI_ShouldBeAccessible() throws Exception {
         // When & Then
         mockMvc.perform(get("/swagger-ui.html"))
-                .andExpected(status().isOk());
+                .andExpect(status().isOk());
     }
 
     @Test
     void apiDocs_ShouldBeAccessible() throws Exception {
         // When & Then
         mockMvc.perform(get("/api-docs"))
-                .andExpected(status().isOk())
-                .andExpected(content().contentType(MediaType.APPLICATION_JSON));
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.APPLICATION_JSON));
     }
 }
