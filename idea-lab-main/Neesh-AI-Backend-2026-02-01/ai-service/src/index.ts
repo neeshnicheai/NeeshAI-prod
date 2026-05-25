@@ -16,7 +16,21 @@ app.use(bodyParser.json());
 import { requireInternalAuth } from './middleware/auth';
 app.use('/internal', requireInternalAuth);
 
+// Apply Supabase auth middleware to all /api routes
+import { supabaseAuth } from './middleware/supabaseAuth';
+app.use('/api', supabaseAuth);
+
 const ragController = new RagController();
+
+// Public API routes (user-facing)
+import { ProjectController } from './controllers/ProjectController';
+const projectController = new ProjectController();
+
+app.get('/api/projects', (req, res) => projectController.getProjects(req, res));
+app.post('/api/projects', (req, res) => projectController.createProject(req, res));
+app.get('/api/projects/:id', (req, res) => projectController.getProject(req, res));
+app.put('/api/projects/:id', (req, res) => projectController.updateProject(req, res));
+app.delete('/api/projects/:id', (req, res) => projectController.deleteProject(req, res));
 
 // Public health check endpoint
 app.get('/', (req, res) => {
