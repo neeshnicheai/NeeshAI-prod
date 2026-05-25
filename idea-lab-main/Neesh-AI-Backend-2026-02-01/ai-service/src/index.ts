@@ -18,6 +18,25 @@ app.use('/internal', requireInternalAuth);
 
 const ragController = new RagController();
 
+// Public health check endpoint
+app.get('/', (req, res) => {
+    res.json({
+        status: 'OK',
+        service: 'Neesh AI Service',
+        version: '1.0.0',
+        timestamp: new Date().toISOString()
+    });
+});
+
+app.get('/health', (req, res) => {
+    res.json({
+        status: 'healthy',
+        service: 'ai-service',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime()
+    });
+});
+
 // Internal API routes
 app.post('/internal/ingest/:projectId', (req, res) => ragController.ingestProject(req, res));
 app.post('/internal/query', (req, res) => ragController.queryVectorStore(req, res));
