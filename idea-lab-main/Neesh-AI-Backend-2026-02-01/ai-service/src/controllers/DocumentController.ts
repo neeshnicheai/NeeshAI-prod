@@ -78,7 +78,23 @@ export class DocumentController {
             const documentGroupId = randomUUID();
             const storagePath = `projects/${projectId}/documents/${documentId}`;
 
-            // Store file content as base64 for now (in production, use proper file storage)
+            // Handle file content based on type
+            let fileContent: string;
+
+            if (file.mimetype.startsWith('text/') ||
+                file.mimetype === 'application/json' ||
+                file.mimetype === 'application/xml') {
+                // Text files - store as UTF-8
+                try {
+                    fileContent = file.buffer.toString('utf-8');
+                } catch (error) {
+                    fileContent = file.buffer.toString('base64');
+                }
+            } else {
+                // Binary files - store as base64
+                fileContent = file.buffer.toString('base64');
+            }
+
             const documentData = {
                 id: documentId,
                 project_id: projectId,
@@ -86,7 +102,7 @@ export class DocumentController {
                 original_filename: file.originalname,
                 mime_type: file.mimetype,
                 storage_path: storagePath,
-                content: file.buffer.toString('utf-8'), // Assuming text files for now
+                content: fileContent,
                 uploaded_by: req.user?.id,
                 is_active: true,
                 version: 1,
@@ -136,11 +152,28 @@ export class DocumentController {
                 return res.status(404).json({ error: 'Document not found' });
             }
 
+            // Handle file content based on type
+            let fileContent: string;
+
+            if (file.mimetype.startsWith('text/') ||
+                file.mimetype === 'application/json' ||
+                file.mimetype === 'application/xml') {
+                // Text files - store as UTF-8
+                try {
+                    fileContent = file.buffer.toString('utf-8');
+                } catch (error) {
+                    fileContent = file.buffer.toString('base64');
+                }
+            } else {
+                // Binary files - store as base64
+                fileContent = file.buffer.toString('base64');
+            }
+
             // Update document with new content
             const updateData = {
                 original_filename: file.originalname,
                 mime_type: file.mimetype,
-                content: file.buffer.toString('utf-8'),
+                content: fileContent,
                 version: document.version + 1,
                 updated_at: new Date().toISOString()
             };
