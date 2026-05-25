@@ -20,7 +20,7 @@ export class ProjectController {
             const { data: projects, error } = await supabase
                 .from('projects')
                 .select('*')
-                .eq('user_id', req.user?.id)
+                .eq('owner_id', req.user?.id)
                 .order('created_at', { ascending: false });
 
             if (error) {
@@ -47,12 +47,14 @@ export class ProjectController {
             }
 
             const projectData = {
-                user_id: req.user?.id,
+                owner_id: req.user?.id,
                 title,
                 one_line_summary: oneLineSummary,
                 introduction: introduction || null,
                 description: description || null,
                 status: 'draft',
+                slug: `${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Date.now()}`,
+                deleted: false,
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString()
             };
@@ -85,7 +87,7 @@ export class ProjectController {
                 .from('projects')
                 .select('*')
                 .eq('id', id)
-                .eq('user_id', req.user?.id)
+                .eq('owner_id', req.user?.id)
                 .single();
 
             if (error) {
@@ -121,7 +123,7 @@ export class ProjectController {
                 .from('projects')
                 .update(updateData)
                 .eq('id', id)
-                .eq('user_id', req.user?.id)
+                .eq('owner_id', req.user?.id)
                 .select()
                 .single();
 
@@ -147,7 +149,7 @@ export class ProjectController {
                 .from('projects')
                 .delete()
                 .eq('id', id)
-                .eq('user_id', req.user?.id);
+                .eq('owner_id', req.user?.id);
 
             if (error) {
                 console.error('[ProjectController] Database error:', error);
