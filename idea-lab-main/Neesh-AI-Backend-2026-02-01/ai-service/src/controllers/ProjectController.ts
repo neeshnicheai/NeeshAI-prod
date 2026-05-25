@@ -61,6 +61,7 @@ export class ProjectController {
             }
 
             const projectData = {
+                // Don't include id - let database auto-generate it
                 owner_id: req.user?.id,
                 title,
                 one_line_summary: oneLineSummary,
@@ -68,9 +69,8 @@ export class ProjectController {
                 description: description || null,
                 status: 'draft',
                 slug: `${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Date.now()}`,
-                deleted: false,
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString()
+                deleted: false
+                // Don't include created_at/updated_at - let database use defaults
             };
 
             const { data: project, error } = await supabase
