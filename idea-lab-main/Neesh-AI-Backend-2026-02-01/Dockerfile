@@ -1,8 +1,8 @@
 # Multi-stage build for Spring Boot backend
-FROM openjdk:17-jdk-slim as build
+FROM eclipse-temurin:17-jdk-alpine as build
 
 # Install Maven
-RUN apt-get update && apt-get install -y maven
+RUN apk add --no-cache maven
 
 WORKDIR /app
 
@@ -15,15 +15,18 @@ COPY src ./src
 RUN mvn clean package -DskipTests
 
 # Production stage
-FROM openjdk:17-jdk-slim
+FROM eclipse-temurin:17-jre-alpine
 
 WORKDIR /app
 
 # Copy the built jar file
 COPY --from=build /app/target/*.jar app.jar
 
-# Create non-root user
-RUN groupadd -r appuser && useradd -r -g appuser appuser
+# Install curl for health checks
+RUN apk add --no-cache curl
+
+# Create non-root user (Alpine style)
+RUN addgroup -g 1001 -S appuser && adduser -S appuser -u 1001
 RUN chown appuser:appuser app.jar
 USER appuser
 
