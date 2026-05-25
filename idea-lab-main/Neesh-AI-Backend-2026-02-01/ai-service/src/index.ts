@@ -16,9 +16,15 @@ app.use(bodyParser.json());
 import { requireInternalAuth } from './middleware/auth';
 app.use('/internal', requireInternalAuth);
 
-// Apply Supabase auth middleware to all /api routes
+// Apply Supabase auth middleware to protected /api routes (exclude /api/public/*)
 import { supabaseAuth } from './middleware/supabaseAuth';
-app.use('/api', supabaseAuth);
+app.use('/api', (req, res, next) => {
+    // Skip auth for public endpoints
+    if (req.path.startsWith('/public/')) {
+        return next();
+    }
+    return supabaseAuth(req, res, next);
+});
 
 const ragController = new RagController();
 
@@ -40,6 +46,23 @@ app.get('/api/documents/project/:projectId', (req, res) => documentController.ge
 app.post('/api/documents/project/:projectId', uploadMiddleware, (req, res) => documentController.uploadDocument(req, res));
 app.put('/api/documents/:documentId/replace', uploadMiddleware, (req, res) => documentController.replaceDocument(req, res));
 app.post('/api/documents/project/:projectId/refresh', (req, res) => documentController.refreshDocuments(req, res));
+
+// Chat API routes
+import { ChatController } from './controllers/ChatController';
+const chatController = new ChatController();
+
+app.post('/api/projects/:id/chat', (req, res) => chatController.chatWithProject(req, res));
+
+// Public chat endpoint (no auth required)
+app.post('/api/public/projects/:id/chat', (req, res) => chatController.publicChatWithProject(req, res));
+
+// API Key management routes
+import { ApiKeyController } from './controllers/ApiKeyController';
+const apiKeyController = new ApiKeyController();
+
+app.get('/api/user/api-keys', (req, res) => apiKeyController.getUserApiKeys(req, res));
+app.post('/api/user/api-keys', (req, res) => apiKeyController.saveApiKey(req, res));
+app.delete('/api/user/api-keys/:provider', (req, res) => apiKeyController.deleteApiKey(req, res));
 
 // Public health check endpoint
 app.get('/', (req, res) => {
