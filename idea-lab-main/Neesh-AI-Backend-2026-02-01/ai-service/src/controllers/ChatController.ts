@@ -117,9 +117,9 @@ export class ChatController {
             // Get project context
             const projectContext = await this.getProjectContext(projectId);
 
-            // Initialize Gemini with user's specific model
+            // Initialize Gemini with working model from your API key
             const genAI = new GoogleGenerativeAI(geminiApiKey);
-            const model = genAI.getGenerativeModel({ model: 'gemini-3.1-flash-lite-preview' });
+            const model = genAI.getGenerativeModel({ model: 'models/gemini-2.5-flash' });
 
             // Build conversation context
             let conversationContext = '';
@@ -197,9 +197,9 @@ Please provide a helpful, accurate response based on the project context and con
             // Get project context
             const projectContext = await this.getProjectContext(projectId);
 
-            // Initialize Gemini with user's specific model
+            // Initialize Gemini with most basic model name
             const genAI = new GoogleGenerativeAI(geminiApiKey);
-            const model = genAI.getGenerativeModel({ model: 'gemini-3.1-flash-lite-preview' });
+            const model = genAI.getGenerativeModel({ model: 'models/gemini-1.5-flash' });
 
             // Create prompt for public chat (simpler, no conversation history)
             const prompt = `You are a chatbot for the project: "${project.title}".
