@@ -83,6 +83,38 @@ app.get('/health', (req, res) => {
     });
 });
 
+// Debug endpoint to test Gemini models
+app.get('/debug/gemini-models', async (req, res) => {
+    try {
+        const { GoogleGenerativeAI } = require('@google/generative-ai');
+        const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+
+        const modelNames = [
+            'gemini-1.5-flash',
+            'gemini-1.5-pro',
+            'gemini-pro',
+            'gemini-1.5-flash-latest',
+            'gemini-1.5-pro-latest'
+        ];
+
+        const results = [];
+
+        for (const modelName of modelNames) {
+            try {
+                const model = genAI.getGenerativeModel({ model: modelName });
+                const result = await model.generateContent('Hello');
+                results.push({ model: modelName, status: 'success', response: result.response.text() });
+            } catch (error) {
+                results.push({ model: modelName, status: 'error', error: error.message });
+            }
+        }
+
+        res.json({ results, timestamp: new Date().toISOString() });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Internal API routes
 app.post('/internal/ingest/:projectId', (req, res) => ragController.ingestProject(req, res));
 app.post('/internal/query', (req, res) => ragController.queryVectorStore(req, res));
