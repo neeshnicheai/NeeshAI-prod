@@ -111,12 +111,15 @@ export class ChatController {
                 });
             }
 
+            console.log('[ChatController] Using Gemini API key:', geminiApiKey ? 'Present' : 'Missing');
+            console.log('[ChatController] Key source:', userGeminiKey ? 'User' : 'System');
+
             // Get project context
             const projectContext = await this.getProjectContext(projectId);
 
             // Initialize Gemini
             const genAI = new GoogleGenerativeAI(geminiApiKey);
-            const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+            const model = genAI.getGenerativeModel({ model: 'gemini-1.5-pro' });
 
             // Build conversation context
             let conversationContext = '';
@@ -196,7 +199,7 @@ Please provide a helpful, accurate response based on the project context and con
 
             // Initialize Gemini
             const genAI = new GoogleGenerativeAI(geminiApiKey);
-            const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+            const model = genAI.getGenerativeModel({ model: 'gemini-1.5-pro' });
 
             // Create prompt for public chat (simpler, no conversation history)
             const prompt = `You are a chatbot for the project: "${project.title}".
