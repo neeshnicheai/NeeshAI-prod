@@ -105,13 +105,13 @@ app.get('/debug/gemini-models', async (req, res) => {
                 const result = await model.generateContent('Hello');
                 results.push({ model: modelName, status: 'success', response: result.response.text() });
             } catch (error) {
-                results.push({ model: modelName, status: 'error', error: error.message });
+                results.push({ model: modelName, status: 'error', error: error instanceof Error ? error.message : String(error) });
             }
         }
 
         res.json({ results, timestamp: new Date().toISOString() });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
     }
 });
 
