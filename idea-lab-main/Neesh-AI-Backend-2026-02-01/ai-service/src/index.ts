@@ -83,42 +83,45 @@ app.get('/health', (req, res) => {
     });
 });
 
-// Debug endpoint to test Gemini models
+// Debug endpoint to test Gemini models and list available models
 app.get('/debug/gemini-models', async (req, res) => {
     try {
-        const { GoogleGenerativeAI } = require('@google/generative-ai');
-        const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+        const apiKey = process.env.GEMINI_API_KEY;
 
-        const modelNames = [
-            'gemini-1.5-flash',
-            'gemini-1.5-pro',
-            'gemini-pro',
-            'gemini-1.5-flash-latest',
-            'gemini-1.5-pro-latest',
-            'models/gemini-1.5-flash',
-            'models/gemini-1.5-pro',
-            'models/gemini-pro',
-            'gemini-1.5-flash-001',
-            'gemini-1.5-pro-001',
-            'gemini-pro-vision',
-            'text-bison-001'
-        ];
-
-        const results = [];
-
-        for (const modelName of modelNames) {
-            try {
-                const model = genAI.getGenerativeModel({ model: modelName });
-                const result = await model.generateContent('Hello');
-                results.push({ model: modelName, status: 'success', response: result.response.text() });
-            } catch (error) {
-                results.push({ model: modelName, status: 'error', error: error instanceof Error ? error.message : String(error) });
-            }
+        if (!apiKey) {
+            return res.status(500).json({ error: 'No GEMINI_API_KEY found' });
         }
 
-        res.json({ results, timestamp: new Date().toISOString() });
+        // Try to list available models using direct API call
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1/models?key=${apiKey}`);
+        const data = await response.json();
+
+        if (!response.ok) {
+            return res.json({
+                apiKeyStatus: 'invalid',
+                error: data.error || 'API key validation failed',
+                keyLength: apiKey.length,
+                keyPrefix: apiKey.substring(0, 10) + '...'
+            });
+        }
+
+        // Extract model names from the response
+        const availableModels = data.models?.map((model: any) => model.name) || [];
+
+        res.json({
+            apiKeyStatus: 'valid',
+            availableModels,
+            totalModels: availableModels.length,
+            keyLength: apiKey.length,
+            keyPrefix: apiKey.substring(0, 10) + '...',
+            timestamp: new Date().toISOString()
+        });
+
     } catch (error) {
-        res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+        res.status(500).json({
+            error: error instanceof Error ? error.message : String(error),
+            apiKeyStatus: 'unknown'
+        });
     }
 });
 
