@@ -5,13 +5,6 @@ import type { Database } from './types';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 
-// Debug logging for configuration
-console.log('[Supabase] Initializing client with:', {
-  url: SUPABASE_URL,
-  keyLength: SUPABASE_PUBLISHABLE_KEY?.length || 0,
-  keyPrefix: SUPABASE_PUBLISHABLE_KEY?.substring(0, 20) + '...',
-});
-
 if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
   console.error('[Supabase] CRITICAL: Missing environment variables!', {
     hasUrl: !!SUPABASE_URL,
@@ -27,8 +20,6 @@ export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABL
     storage: localStorage,
     persistSession: true,
     autoRefreshToken: true,
-    debug: true, // Enable Supabase's internal auth debugging
+    debug: false,
   }
 });
-
-console.log('[Supabase] Client created successfully');

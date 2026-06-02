@@ -16,6 +16,7 @@ interface BackendAudienceMemberSummary {
   feedbackSummary: string | null;
   firstInteractionAt: string | null;
   lastInteractionAt: string | null;
+  questionCount: number;
 }
 
 interface BackendAudienceListResponse {
@@ -70,6 +71,8 @@ function mapOccupationToPersona(occupation: string | null, personaType: string |
   return "other";
 }
 
+import { supabase } from "@/integrations/supabase/client";
+
 export const useAudienceData = (projectId: string | undefined) => {
   const [members, setMembers] = useState<AudienceMember[]>([]);
   const [loading, setLoading] = useState(true);
@@ -98,7 +101,7 @@ export const useAudienceData = (projectId: string | undefined) => {
         occupation: m.occupation,
         detected_persona: mapOccupationToPersona(m.occupation, m.personaType),
         persona_confidence: m.confidenceScore,
-        total_questions: null,
+        total_questions: m.questionCount || 0,
         total_feedback: m.feedbackSummary ? 1 : 0,
         first_interaction_at: m.firstInteractionAt || new Date().toISOString(),
         last_interaction_at: m.lastInteractionAt || new Date().toISOString(),
@@ -119,7 +122,31 @@ export const useAudienceData = (projectId: string | undefined) => {
 
   useEffect(() => {
     fetchData();
-  }, [fetchData]);
+
+    if (!projectId) return;
+
+    // Subscribe to real-time changes
+    const channel = supabase
+      .channel(`public:audience_members:project_id=eq.${projectId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "audience_members",
+          filter: `project_id=eq.${projectId}`,
+        },
+        () => {
+          console.log("[useAudienceData] Data changed, refetching...");
+          fetchData();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [projectId, fetchData]);
 
   // Compute aggregated persona data from members
   const getAggregatedPersonaData = useCallback((): AggregatedPersonaData[] => {
@@ -143,7 +170,6 @@ export const useAudienceData = (projectId: string | undefined) => {
     const totalMembers = members.length || 1;
 
     return Object.entries(personaGroups)
-      .filter(([_, groupMembers]) => groupMembers.length > 0)
       .map(([persona, groupMembers]) => ({
         persona: persona as PersonaType,
         members: groupMembers.length,
@@ -169,10 +195,12 @@ export const useAudienceData = (projectId: string | undefined) => {
   // Compute stats
   const stats = useMemo(() => ({
     totalMembers: members.length,
-    totalQuestions: 0, // Questions come from notification clusters, not this hook
+    totalQuestions: 0, // Should be supplemented by clusters from useNotifications
     unansweredQuestions: 0,
     totalFeedback: members.filter(m => m.feedbackSummary).length,
     uniqueOccupations: new Set(members.map(m => m.occupation).filter(Boolean)).size,
+    totalConfusionPoints: 0, // Placeholder, AudienceInsights.tsx will compute this from clusters
+    totalSuggestions: 0,     // Placeholder
   }), [members]);
 
   return {

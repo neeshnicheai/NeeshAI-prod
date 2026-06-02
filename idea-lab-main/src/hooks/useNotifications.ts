@@ -1,5 +1,6 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import apiClient from '@/lib/api';
+import { supabase } from "@/integrations/supabase/client";
 
 // ===== Types =====
 
@@ -96,8 +97,8 @@ export function useNotifications(projectId: string | undefined) {
             const data = await apiClient.get<ClusterListResponse>(
                 `/api/projects/${projectId}/notifications${queryStr}`
             );
-            setClusters(data.clusters);
-            setUnansweredCount(data.unansweredCount);
+            setClusters(data.clusters || []);
+            setUnansweredCount(data.unansweredCount || 0);
         } catch (err) {
             console.error('[Notifications] Failed to fetch clusters:', err);
         } finally {
@@ -155,11 +156,41 @@ export function useNotifications(projectId: string | undefined) {
             const data = await apiClient.get<BadgeCountResponse>(
                 `/api/projects/${projectId}/notifications/count`
             );
-            setBadgeCount(data.count);
+            setBadgeCount(data.count || 0);
         } catch (err) {
             console.error('[Notifications] Failed to fetch badge count:', err);
         }
     }, [projectId]);
+
+    useEffect(() => {
+        if (!projectId) return;
+
+        fetchClusters();
+        fetchBadgeCount();
+
+        // Subscribe to real-time changes
+        const channel = supabase
+            .channel(`public:question_clusters:project_id=eq.${projectId}`)
+            .on(
+                "postgres_changes",
+                {
+                    event: "*",
+                    schema: "public",
+                    table: "question_clusters",
+                    filter: `project_id=eq.${projectId}`,
+                },
+                () => {
+                    console.log("[Notifications] Clusters changed, refetching...");
+                    fetchClusters();
+                    fetchBadgeCount();
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [projectId, fetchClusters, fetchBadgeCount]);
 
     return {
         clusters,

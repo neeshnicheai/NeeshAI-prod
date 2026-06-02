@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAuth } from "./useAuth";
 import { toast } from "sonner";
 import apiClient from "@/lib/api";
@@ -12,6 +12,10 @@ interface BackendProject {
   introduction: string | null;
   description: string | null;
   status: string;
+  chatbotName: string | null;
+  welcomeMessage: string | null;
+  primaryColor: string | null;
+  botAvatarUrl: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -26,6 +30,10 @@ export interface Project {
   introduction: string | null;
   description: string | null;
   status: string;
+  chatbot_name: string | null;
+  welcome_message: string | null;
+  primary_color: string | null;
+  bot_avatar_url: string | null;
   deleted: boolean;
   created_at: string;
   updated_at: string;
@@ -36,6 +44,10 @@ export interface CreateProjectInput {
   one_line_summary?: string;
   introduction?: string;
   description?: string;
+  chatbot_name?: string;
+  welcome_message?: string;
+  primary_color?: string;
+  bot_avatar_url?: string | null;
 }
 
 export interface UpdateProjectInput {
@@ -44,6 +56,10 @@ export interface UpdateProjectInput {
   introduction?: string;
   description?: string;
   status?: string;
+  chatbot_name?: string;
+  welcome_message?: string;
+  primary_color?: string;
+  bot_avatar_url?: string | null;
 }
 
 // Transform backend response to frontend format
@@ -56,6 +72,10 @@ const transformProject = (backendProject: BackendProject): Project => ({
   introduction: backendProject.introduction,
   description: backendProject.description,
   status: backendProject.status,
+  chatbot_name: backendProject.chatbotName,
+  welcome_message: backendProject.welcomeMessage,
+  primary_color: backendProject.primaryColor,
+  bot_avatar_url: backendProject.botAvatarUrl,
   deleted: false,
   created_at: backendProject.createdAt,
   updated_at: backendProject.updatedAt,
@@ -67,6 +87,10 @@ const transformCreateInput = (input: CreateProjectInput) => ({
   oneLineSummary: input.one_line_summary || null,
   introduction: input.introduction || null,
   description: input.description || null,
+  chatbotName: input.chatbot_name || null,
+  welcomeMessage: input.welcome_message || null,
+  primaryColor: input.primary_color || null,
+  botAvatarUrl: input.bot_avatar_url || null,
 });
 
 const transformUpdateInput = (input: UpdateProjectInput) => ({
@@ -75,6 +99,10 @@ const transformUpdateInput = (input: UpdateProjectInput) => ({
   introduction: input.introduction,
   description: input.description,
   status: input.status,
+  chatbotName: input.chatbot_name,
+  welcomeMessage: input.welcome_message,
+  primaryColor: input.primary_color,
+  botAvatarUrl: input.bot_avatar_url,
 });
 
 export const useProjects = () => {
@@ -83,12 +111,26 @@ export const useProjects = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchProjects = async () => {
+  // Guard against duplicate fetches during auth state transitions
+  const lastFetchedUserIdRef = useRef<string | null>(null);
+  const isFetchingRef = useRef(false);
+
+  const fetchProjects = async (force = false) => {
     if (!user) {
       setProjects([]);
       setLoading(false);
+      lastFetchedUserIdRef.current = null;
       return;
     }
+
+    // Skip if we already fetched for this user (unless forced)
+    if (!force && lastFetchedUserIdRef.current === user.id && projects.length >= 0 && !loading) {
+      return;
+    }
+
+    // Prevent concurrent fetches
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
 
     try {
       setLoading(true);
@@ -100,12 +142,14 @@ export const useProjects = () => {
 
       const transformedProjects = backendProjects.map(transformProject);
       setProjects(transformedProjects);
+      lastFetchedUserIdRef.current = user.id;
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to fetch projects";
       setError(message);
       console.error("[useProjects] Error fetching projects:", err);
     } finally {
       setLoading(false);
+      isFetchingRef.current = false;
     }
   };
 

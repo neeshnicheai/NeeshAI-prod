@@ -2,10 +2,11 @@ import { useParams, Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, Image, Share2, Clock, Send, MessageCircle, Copy, Check, Link2, Loader2, Sparkles } from "lucide-react";
 import { NeeshLogo } from "@/components/NeeshLogo";
+import ReactMarkdown from 'react-markdown';
 import { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { Progress } from "@/components/ui/progress";
 import { Input } from "@/components/ui/input";
-import chatbotAvatar from "@/assets/chatbot-avatar.png";
+import defaultChatbotAvatar from "@/assets/chatbot-avatar.png";
 import { toast } from "@/hooks/use-toast";
 import { generateShareableUrl } from "@/lib/slugify";
 import { useBlogs, type Blog, type CustomField } from "@/hooks/useBlogs";
@@ -69,21 +70,31 @@ const BlogPreview = ({ publicId }: BlogPreviewProps) => {
   const { reportQuestion } = useQuestions(id);
 
   const [blogData, setBlogData] = useState<BlogData | null>(null);
+
+  // Chatbot settings derived from blogData
+  const botName = blogData?.chatbot_name || 'Health Blog Assistant';
+  const chatbotAvatar = blogData?.bot_avatar_url || defaultChatbotAvatar;
+  const initialWelcomeMessage = blogData?.welcome_message || "Hello! 👋 I'm here to help answer any questions you have about this blog post. Feel free to ask me anything!";
   const [chatbotVisible, setChatbotVisible] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadStartTime] = useState(() => Date.now());
+  const [slowLoad, setSlowLoad] = useState(false);
   const [scrollY, setScrollY] = useState(0);
   const [readingProgress, setReadingProgress] = useState(0);
   const [coverImageBroken, setCoverImageBroken] = useState(false);
   const [activeSection, setActiveSection] = useState<string>("");
   const [visibleSections, setVisibleSections] = useState<Set<string>>(new Set());
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    {
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+
+  // Re-initialize welcome message when blogData changes
+  useEffect(() => {
+    setChatMessages([{
       id: "1",
       role: "bot",
-      content: "Hello! 👋 I'm here to help answer any questions you have about this blog post. Feel free to ask me anything!",
+      content: initialWelcomeMessage,
       timestamp: new Date(),
-    },
-  ]);
+    }]);
+  }, [initialWelcomeMessage]);
   const [chatInput, setChatInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
@@ -96,6 +107,13 @@ const BlogPreview = ({ publicId }: BlogPreviewProps) => {
     customBrandingText: string | null;
     showNeeshBranding: boolean;
   } | null>(null);
+
+  // Generate a stable session ID once per page load for grouping anonymous chat questions
+  const sessionIdRef = useRef<string>(
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" 
+      ? crypto.randomUUID() 
+      : Math.random().toString(36).substring(2, 15)
+  );
 
   const updateFeedbackValue = useCallback((fieldId: string, value: any) => {
     setFeedbackValues(prev => ({ ...prev, [fieldId]: value }));
@@ -163,10 +181,19 @@ const BlogPreview = ({ publicId }: BlogPreviewProps) => {
   const contentRef = useRef<HTMLDivElement>(null);
   const sectionRefs = useRef<Map<string, HTMLElement>>(new Map());
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
   const chatbotSectionRef = useRef<HTMLDivElement>(null);
   const commentSectionRef = useRef<HTMLDivElement>(null);
 
-  // Fetch blog data from the database
+  // Show "taking longer than usual" after 5 seconds (Render cold start)
+  useEffect(() => {
+    if (!loading) return;
+    const timer = setTimeout(() => setSlowLoad(true), 5000);
+    return () => clearTimeout(timer);
+  }, [loading]);
+
+  // Fetch blog data from the database — only depends on `id`, NOT `coverImage`
+  // coverImage from localStorage is used as a fallback at render time, not as a trigger.
   useEffect(() => {
     const loadBlogData = async () => {
       if (!id) return;
@@ -250,7 +277,7 @@ const BlogPreview = ({ publicId }: BlogPreviewProps) => {
           console.log("Raw blog data:", blog);
           console.log("Constructed sections:", sections);
 
-          // Use DB image if available and non-empty, otherwise try localStorage
+          // Use DB image if available and non-empty, otherwise try localStorage fallback
           const dbCoverImage = blog?.cover_image_url && blog.cover_image_url.length > 10 ? blog.cover_image_url : null;
           const finalCoverImage = dbCoverImage || coverImage || undefined;
 
@@ -267,11 +294,13 @@ const BlogPreview = ({ publicId }: BlogPreviewProps) => {
         console.error("Error loading blog data:", err);
       } finally {
         setLoading(false);
+        setSlowLoad(false);
       }
     };
 
     loadBlogData();
-  }, [id, coverImage]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   // Fetch branding info for the blog
   useEffect(() => {
@@ -354,9 +383,21 @@ const BlogPreview = ({ publicId }: BlogPreviewProps) => {
     return () => observer.disconnect();
   }, [blogData]);
 
-  // Scroll chat to bottom when new messages arrive
+  // Scroll chat to bottom when new messages arrive, but only if user is near bottom
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (!chatContainerRef.current) return;
+    
+    const container = chatContainerRef.current;
+    const isAtBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 150;
+    
+    if (isAtBottom) {
+      // Use scrollTo on the container instead of scrollIntoView on the element
+      // to avoid jumping the whole page viewport
+      container.scrollTo({
+        top: container.scrollHeight,
+        behavior: "smooth"
+      });
+    }
   }, [chatMessages, isTyping]);
 
   // Calculate reading time
@@ -521,10 +562,41 @@ const BlogPreview = ({ publicId }: BlogPreviewProps) => {
   };
   if (loading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-center">
-          <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto mb-4" />
-          <p className="text-muted-foreground">Loading blog...</p>
+      <div className="min-h-screen bg-background">
+        {/* Skeleton Hero */}
+        <div className="relative h-[80vh] overflow-hidden bg-gradient-to-br from-primary/10 via-accent/5 to-background">
+          <div className="absolute inset-0">
+            <div className="absolute w-64 h-64 rounded-full bg-primary/10 blur-3xl animate-pulse" style={{ top: '10%', left: '20%' }} />
+            <div className="absolute w-48 h-48 rounded-full bg-accent/15 blur-3xl animate-pulse" style={{ top: '40%', right: '15%', animationDelay: '1s' }} />
+          </div>
+          <div className="absolute inset-0 bg-gradient-to-t from-background via-background/60 to-transparent" />
+          <div className="absolute bottom-0 left-0 right-0 p-8 md:p-16">
+            <div className="max-w-5xl mx-auto space-y-4">
+              <div className="h-12 w-3/4 bg-muted/50 rounded-xl animate-pulse" />
+              <div className="h-8 w-1/2 bg-muted/30 rounded-lg animate-pulse" style={{ animationDelay: '200ms' }} />
+            </div>
+          </div>
+        </div>
+
+        {/* Skeleton Content */}
+        <div className="max-w-5xl mx-auto px-6 py-16 space-y-6">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="bg-card border border-border p-8 shadow-sm space-y-4" style={{ animationDelay: `${i * 150}ms` }}>
+              <div className="h-4 w-full bg-muted/40 rounded animate-pulse" />
+              <div className="h-4 w-5/6 bg-muted/30 rounded animate-pulse" style={{ animationDelay: '100ms' }} />
+              <div className="h-4 w-4/6 bg-muted/20 rounded animate-pulse" style={{ animationDelay: '200ms' }} />
+            </div>
+          ))}
+        </div>
+
+        {/* Centered loading indicator */}
+        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50">
+          <div className="flex items-center gap-3 px-5 py-3 rounded-full bg-card/90 backdrop-blur-xl border border-border/50 shadow-lg">
+            <Loader2 className="w-4 h-4 animate-spin text-primary" />
+            <span className="text-sm text-muted-foreground">
+              {slowLoad ? 'Almost there — waking up the servers...' : 'Loading blog...'}
+            </span>
+          </div>
         </div>
       </div>
     );
@@ -550,6 +622,7 @@ const BlogPreview = ({ publicId }: BlogPreviewProps) => {
         query: message,
         userName: feedbackValues['__name__'] || undefined,
         userEmail: feedbackValues['__email__'] || undefined,
+        sessionId: sessionIdRef.current,
       }, { skipAuth: true });
 
       const botMessage: ChatMessage = {
@@ -848,21 +921,21 @@ const BlogPreview = ({ publicId }: BlogPreviewProps) => {
                         </div>
                       ) : section.type === "image" ? (
                         // Render Image Section — no label in preview
-                        <div className="pl-4">
+                        <div className="pl-4 flex justify-center bg-muted/5 rounded-xl overflow-hidden">
                           <img
                             src={section.content}
                             alt={section.title}
-                            className="w-full object-cover max-h-[500px]"
+                            className="max-w-full h-auto max-h-[600px] object-contain rounded-xl"
                           />
                         </div>
                       ) : section.type === "video" ? (
                         // Render Video Section — no label in preview
-                        <div className="pl-4">
+                        <div className="pl-4 flex justify-center rounded-xl overflow-hidden bg-black">
                           <video
                             src={section.content}
                             controls
                             preload="metadata"
-                            className="w-full max-h-[500px] rounded-xl bg-black"
+                            className="max-w-full h-auto max-h-[600px] object-contain rounded-xl"
                           />
                         </div>
                       ) : (
@@ -909,15 +982,15 @@ const BlogPreview = ({ publicId }: BlogPreviewProps) => {
                   {/* Header */}
                   <div className="relative flex items-center gap-4 mb-6">
                     <div className="relative">
-                      <div className="w-14 h-14 rounded-full overflow-hidden border-2 border-accent/50 shadow-[0_0_20px_hsl(var(--accent)/0.3)]">
-                        <img src={chatbotAvatar} alt="AI Assistant" className="w-full h-full object-cover" />
+                      <div className="w-16 h-16 drop-shadow-[0_0_20px_hsl(var(--accent)/0.3)]">
+                        <img src={chatbotAvatar} alt="AI Assistant" className="w-full h-full object-contain" />
                       </div>
                       <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-card" />
                     </div>
                     <div>
                       <h3 className="font-display text-xl font-bold text-foreground flex items-center gap-2">
                         <MessageCircle className="w-5 h-5 text-accent" />
-                        Ask Me Anything
+                        {botName}
                       </h3>
                       <p className="text-sm text-muted-foreground">Have questions? I'm here to help!</p>
                     </div>
@@ -935,31 +1008,42 @@ const BlogPreview = ({ publicId }: BlogPreviewProps) => {
 
                   {/* FAQ Chips */}
                   <div className="relative flex flex-wrap gap-2 mb-6">
-                    {faqChips.map((chip, index) => (
+                    {faqs.map((faq) => (
                       <button
-                        key={index}
-                        onClick={() => handleSendMessage(chip)}
+                        key={faq.id}
+                        onClick={() => handleSendMessage(faq.question)}
                         className="px-4 py-2 rounded-full bg-muted/50 hover:bg-muted text-sm text-foreground border border-border/50 transition-all hover:scale-105 hover:shadow-md"
                       >
-                        {chip}
+                        {faq.question}
                       </button>
                     ))}
                   </div>
 
                   {/* Chat Messages */}
-                  <div className="relative h-64 overflow-y-auto mb-4 space-y-4 scrollbar-thin scrollbar-thumb-muted scrollbar-track-transparent pr-2">
+                  <div 
+                    ref={chatContainerRef}
+                    className="relative h-64 overflow-y-auto mb-4 space-y-4 scrollbar-thin scrollbar-thumb-muted scrollbar-track-transparent pr-2"
+                  >
                     {chatMessages.map((msg) => (
                       <div
                         key={msg.id}
                         className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
                       >
                         <div
-                          className={`max-w-[80%] rounded-2xl px-4 py-3 ${msg.role === "user"
+                          className={`max-w-[85%] rounded-2xl px-4 py-3 ${msg.role === "user"
                             ? "bg-primary text-primary-foreground rounded-br-md"
-                            : "bg-muted/80 text-foreground rounded-bl-md"
+                            : "bg-muted/80 text-foreground border border-border/50 rounded-bl-md shadow-sm"
                             }`}
                         >
-                          <p className="text-sm leading-relaxed">{msg.content}</p>
+                          {msg.role === "user" ? (
+                            <p className="text-[15px] sm:text-base leading-relaxed tracking-wide whitespace-pre-wrap">{msg.content}</p>
+                          ) : (
+                            <div className="prose prose-sm dark:prose-invert max-w-none text-left w-full break-words [&>p]:mb-3 [&>p:last-child]:mb-0 [&>ul]:mb-3 [&>ol]:mb-3 [&>ul]:pl-6 [&>ol]:pl-6 [&>li]:mb-2 [&>ul>li]:list-disc [&>ol>li]:list-decimal leading-relaxed">
+                              <ReactMarkdown>
+                                {msg.content}
+                              </ReactMarkdown>
+                            </div>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -1075,8 +1159,8 @@ const BlogPreview = ({ publicId }: BlogPreviewProps) => {
             Any help ??
           </span>
           {/* Avatar circle */}
-          <div className="w-14 h-14 rounded-full overflow-hidden border-2 border-accent/50 shadow-lg shadow-accent/20 hover:scale-110 transition-transform duration-200">
-            <img src={chatbotAvatar} alt="AI Assistant" className="w-full h-full object-cover" />
+          <div className="w-32 h-32 hover:scale-110 transition-transform duration-200 drop-shadow-[0_0_20px_rgba(9,218,237,0.7)]">
+            <img src={chatbotAvatar} alt="AI Assistant" className="w-full h-full object-contain" />
           </div>
         </button>
       )}

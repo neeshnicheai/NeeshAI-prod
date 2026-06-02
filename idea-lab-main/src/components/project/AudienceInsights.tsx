@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
@@ -22,7 +22,8 @@ import {
   Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useAudienceData, type AudienceMember } from "@/hooks/useAudienceData";
+import { useAudienceData, type AudienceMember, type AggregatedPersonaData } from "@/hooks/useAudienceData";
+import { useNotifications, type ClusterSummary } from "@/hooks/useNotifications";
 import type { Database } from "@/integrations/supabase/types";
 
 type PersonaType = Database["public"]["Enums"]["audience_persona"];
@@ -51,13 +52,90 @@ const AudienceInsights = ({ projectId }: AudienceInsightsProps) => {
     stats,
   } = useAudienceData(projectId);
 
+  const {
+    clusters,
+    loading: notificationsLoading,
+    unansweredCount,
+  } = useNotifications(projectId);
+
   const [selectedPersona, setSelectedPersona] = useState<PersonaType | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [activeView, setActiveView] = useState<"overview" | "members">("overview");
 
-  const aggregatedPersonas = getAggregatedPersonaData();
+  // Map clusters to personas for detailed insights
+  const aggregatedPersonas = useMemo(() => {
+    const baseGroups = getAggregatedPersonaData();
+    const personaKeywords: Record<string, string[]> = {
+      developer: ["developer", "engineer", "software", "tech", "code", "programm", "stack", "dev", "frontend", "backend", "api"],
+      marketer: ["market", "growth", "seo", "sales", "content", "advert"],
+      investor: ["invest", "vc", "fund", "capital", "finance", "equity"],
+      designer: ["design", "ui", "ux", "creative", "graphic", "art"],
+      entrepreneur: ["entrepreneur", "founder", "ceo", "business", "startup", "owner"],
+      researcher: ["research", "academ", "student", "science", "analys", "studi", "phd", "university", "professor"],
+    };
+    
+    return baseGroups.map(group => {
+      const keywords = personaKeywords[group.persona] || [];
+      
+      // Find clusters associated with this persona
+      const personaClusters = clusters.filter(c => {
+        const summary = (c.personaSummary || "").toLowerCase();
+        const question = (c.canonicalQuestion || "").toLowerCase();
+        const combinedText = `${summary} ${question}`;
+        
+        if (group.persona === "other") {
+          // "Other" gets clusters that don't match any primary persona keywords
+          const allKeywords = Object.values(personaKeywords).flat();
+          return !allKeywords.some(k => combinedText.includes(k));
+        }
+        
+        // Primary personas get clusters that match any of their keywords in summary OR question text
+        return keywords.some(k => combinedText.includes(k));
+      });
+
+      // Collect feedback themes from members in this persona
+      const personaMembers = baseGroups.find(bg => bg.persona === group.persona)?.feedbackCount || 0;
+      const feedbackThemes = members
+        .filter(m => (m.detected_persona || 'other') === group.persona && m.feedbackSummary)
+        .map(m => m.feedbackSummary!)
+        .slice(0, 3);
+
+      return {
+        ...group,
+        totalQuestions: personaClusters.reduce((sum, c) => sum + c.totalAskCount, 0),
+        confusionPoints: personaClusters.length > 0 
+          ? personaClusters
+              .filter(c => c.status !== 'answered')
+              .slice(0, 3)
+              .map(c => ({
+                topic: c.canonicalQuestion,
+                count: c.totalAskCount
+              }))
+          : feedbackThemes.length > 0
+            ? feedbackThemes.map(theme => ({ topic: theme, count: 1 }))
+            : [],
+        commonQuestions: personaClusters.length > 0
+          ? personaClusters.slice(0, 3).map(c => c.canonicalQuestion)
+          : feedbackThemes.length > 0
+            ? feedbackThemes
+            : [],
+        contentSuggestions: [
+          ...(personaClusters.length > 0 
+            ? personaClusters.filter(c => c.status !== 'answered').slice(0, 2).map(c => `Explain ${c.canonicalQuestion} in your next update`)
+            : []),
+          ...(feedbackThemes.length > 0
+            ? feedbackThemes.slice(0, 2).map(theme => `Address feedback: "${theme}"`)
+            : []),
+          ...(personaClusters.length === 0 && feedbackThemes.length === 0 
+            ? [`Create a guide tailored for ${personaConfig[group.persona].name}`] 
+            : [])
+        ].slice(0, 3)
+      };
+    });
+  }, [getAggregatedPersonaData, clusters, members]);
+
   const selectedPersonaData = selectedPersona
-    ? aggregatedPersonas.find((p) => p.persona === selectedPersona)
+    ? (aggregatedPersonas as any[]).find((p) => p.persona === selectedPersona)
     : null;
 
   const handleAnalyze = async () => {
@@ -100,7 +178,7 @@ const AudienceInsights = ({ projectId }: AudienceInsightsProps) => {
     });
   };
 
-  if (loading) {
+  if (loading || notificationsLoading) {
     return (
       <div className="flex items-center justify-center py-16">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
@@ -201,7 +279,9 @@ const AudienceInsights = ({ projectId }: AudienceInsightsProps) => {
             </div>
             <span className="text-sm font-medium text-muted-foreground">Total Questions</span>
           </div>
-          <p className="text-3xl font-display font-bold text-foreground">{stats.totalQuestions}</p>
+          <p className="text-3xl font-display font-bold text-foreground">
+            {clusters.reduce((sum, c) => sum + c.totalAskCount, 0)}
+          </p>
         </div>
         <div className="bg-card rounded-2xl border border-border/30 p-5 shadow-card">
           <div className="flex items-center gap-3 mb-3">
@@ -210,7 +290,9 @@ const AudienceInsights = ({ projectId }: AudienceInsightsProps) => {
             </div>
             <span className="text-sm font-medium text-muted-foreground">Confusion Points</span>
           </div>
-          <p className="text-3xl font-display font-bold text-foreground">{stats.totalConfusionPoints}</p>
+          <p className="text-3xl font-display font-bold text-foreground">
+            {clusters.filter(c => c.status !== 'answered').length}
+          </p>
         </div>
         <div className="bg-card rounded-2xl border border-border/30 p-5 shadow-card">
           <div className="flex items-center gap-3 mb-3">
@@ -219,7 +301,9 @@ const AudienceInsights = ({ projectId }: AudienceInsightsProps) => {
             </div>
             <span className="text-sm font-medium text-muted-foreground">Suggestions</span>
           </div>
-          <p className="text-3xl font-display font-bold text-foreground">{stats.totalSuggestions}</p>
+          <p className="text-3xl font-display font-bold text-foreground">
+            {clusters.filter(c => c.status !== 'answered').length}
+          </p>
         </div>
       </div>
 

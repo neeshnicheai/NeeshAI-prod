@@ -1,35 +1,49 @@
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { compressImage } from "@/lib/imageUtils";
+import { uploadFileToStorage, isBase64, migrateBase64ToStorage } from "@/lib/storage";
 
 /**
- * Stores cover images as compressed base64 data URLs in localStorage.
- * Images are compressed client-side (resized to 2560px, converted to WebP at 0.92 quality)
- * before being stored. Files under 1MB are kept as-is.
+ * Manages cover images using Supabase Storage.
+ * Images are compressed client-side then uploaded to storage.
+ * Falls back to localStorage for reading old base64 data.
  */
 export const useCoverImage = (projectId: string | undefined) => {
   const [coverImage, setCoverImage] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
 
-  // Load cover image from localStorage
+  // Load cover image — check localStorage first (legacy), then storage URL
   useEffect(() => {
     if (!projectId) return;
+
     const saved = localStorage.getItem(`cover-image-${projectId}`);
     if (saved) {
       setCoverImage(saved);
+
+      // If it's still base64 (legacy), migrate to Storage in background
+      if (isBase64(saved)) {
+        migrateBase64ToStorage(projectId, saved, "cover").then((url) => {
+          if (url && url !== saved) {
+            // Update localStorage with the new URL
+            localStorage.setItem(`cover-image-${projectId}`, url);
+            setCoverImage(url);
+            console.log("[CoverImage] Migrated base64 to Storage URL:", url);
+          }
+        }).catch(() => {
+          // Keep base64 as fallback
+        });
+      }
     }
   }, [projectId]);
 
   const uploadCoverImage = async (file: File) => {
     if (!projectId) return;
 
-    // Validate file size (max 10MB raw — compression will bring it down)
     if (file.size > 10 * 1024 * 1024) {
       toast.error("Image too large. Please upload an image under 10MB.");
       return;
     }
 
-    // Validate file type
     if (!file.type.startsWith("image/")) {
       toast.error("Please upload a valid image file.");
       return;
@@ -38,20 +52,15 @@ export const useCoverImage = (projectId: string | undefined) => {
     setUploading(true);
 
     try {
-      // Compress image (resize to 1920px, convert to WebP ~200-500KB)
+      // Compress image first
       const compressedFile = await compressImage(file);
 
-      // Convert compressed file to base64 data URL
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = () => reject(new Error("Failed to read image"));
-        reader.readAsDataURL(compressedFile);
-      });
+      // Upload to Supabase Storage
+      const url = await uploadFileToStorage(projectId, compressedFile, "cover");
 
-      // Store in localStorage
-      localStorage.setItem(`cover-image-${projectId}`, dataUrl);
-      setCoverImage(dataUrl);
+      // Store URL in localStorage (not base64 anymore)
+      localStorage.setItem(`cover-image-${projectId}`, url);
+      setCoverImage(url);
       toast.success("Cover image uploaded successfully!");
     } catch (error) {
       console.error("Upload error:", error);

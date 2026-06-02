@@ -38,10 +38,18 @@ async function adminFetch<T>(endpoint: string, options: RequestInit = {}): Promi
 
 // --- Auth ---
 export async function adminLogin(username: string, password: string) {
-  return adminFetch<{ token: string; displayName: string }>('/api/public/admin/login', {
+  const response = await fetch(`${BASE_URL}/api/public/admin/login`, {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password }),
   });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `Login failed with status ${response.status}`);
+  }
+
+  return response.json() as Promise<{ token: string; displayName: string }>;
 }
 
 // --- Users ---

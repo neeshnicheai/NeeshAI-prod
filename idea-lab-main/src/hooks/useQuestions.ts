@@ -1,7 +1,7 @@
 
 import { useState, useCallback } from "react";
 import { toast } from "sonner";
-import { supabase } from "@/integrations/supabase/client";
+import apiClient from "@/lib/api";
 
 export interface Question {
     id: string;
@@ -11,6 +11,24 @@ export interface Question {
     isResolved: boolean;
 }
 
+export interface AudienceQuestionDTO {
+    id: string;
+    questionText: string;
+    chatbotAnswer: string | null;
+    customAdminAnswer: string | null;
+    status: "answered" | "unanswered";
+    askedAt: string;
+    answeredAt: string | null;
+    respondedAt: string | null;
+}
+
+interface AudienceMemberDetail {
+    id: string;
+    name: string;
+    email: string;
+    questions: AudienceQuestionDTO[];
+}
+
 interface QuestionResponse {
     questions: Question[];
     count: number;
@@ -18,26 +36,17 @@ interface QuestionResponse {
 
 export const useQuestions = (projectId: string | undefined) => {
     const [questions, setQuestions] = useState<Question[]>([]);
+    const [answeredQuestions, setAnsweredQuestions] = useState<AudienceQuestionDTO[]>([]);
+    const [unansweredMemberQuestions, setUnansweredMemberQuestions] = useState<AudienceQuestionDTO[]>([]);
     const [loading, setLoading] = useState(false);
+    const [memberLoading, setMemberLoading] = useState(false);
 
     const fetchUnansweredQuestions = useCallback(async () => {
         if (!projectId) return;
         try {
             setLoading(true);
-            const session = await supabase.auth.getSession();
-            const token = session.data?.session?.access_token;
-            const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:8081";
-
-            const response = await fetch(`${backendUrl}/api/projects/${projectId}/questions/unanswered`, {
-                headers: {
-                    "Authorization": `Bearer ${token}`
-                }
-            });
-
-            if (response.ok) {
-                const data: QuestionResponse = await response.json();
-                setQuestions(data.questions);
-            }
+            const data = await apiClient.get<QuestionResponse>(`/api/projects/${projectId}/questions/unanswered`);
+            setQuestions(data.questions);
         } catch (err) {
             console.error("Error fetching questions:", err);
         } finally {
@@ -45,18 +54,30 @@ export const useQuestions = (projectId: string | undefined) => {
         }
     }, [projectId]);
 
+    /**
+     * Fetch all questions for a specific audience member from the audience_questions table.
+     * Splits them into answered and unanswered arrays.
+     */
+    const fetchMemberQuestions = useCallback(async (memberId: string) => {
+        if (!memberId) return;
+        try {
+            setMemberLoading(true);
+            const data = await apiClient.get<AudienceMemberDetail>(`/api/audience/${memberId}`);
+            const allQuestions = data.questions || [];
+            setAnsweredQuestions(allQuestions.filter(q => q.status === "answered"));
+            setUnansweredMemberQuestions(allQuestions.filter(q => q.status === "unanswered"));
+        } catch (err) {
+            console.error("Error fetching member questions:", err);
+        } finally {
+            setMemberLoading(false);
+        }
+    }, []);
+
     const reportQuestion = async (questionText: string) => {
         if (!projectId) return;
         try {
-            const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:8081";
-            // Public endpoint, no auth header needed for reporting
-            await fetch(`${backendUrl}/api/public/projects/${projectId}/questions/report`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({ question: questionText })
-            });
+            // Public endpoint, use skipAuth: true
+            await apiClient.post(`/api/public/projects/${projectId}/questions/report`, { question: questionText }, { skipAuth: true });
         } catch (err) {
             console.error("Error reporting question:", err);
         }
@@ -64,21 +85,9 @@ export const useQuestions = (projectId: string | undefined) => {
 
     const resolveQuestion = async (questionId: string) => {
         try {
-            const session = await supabase.auth.getSession();
-            const token = session.data?.session?.access_token;
-            const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:8081";
-
-            const response = await fetch(`${backendUrl}/api/questions/${questionId}/resolve`, {
-                method: "PUT",
-                headers: {
-                    "Authorization": `Bearer ${token}`
-                }
-            });
-
-            if (response.ok) {
-                setQuestions(prev => prev.filter(q => q.id !== questionId));
-                toast.success("Question resolved");
-            }
+            await apiClient.put(`/api/questions/${questionId}/resolve`);
+            setQuestions(prev => prev.filter(q => q.id !== questionId));
+            toast.success("Question resolved");
         } catch (err) {
             console.error("Error resolving question:", err);
             toast.error("Failed to resolve question");
@@ -87,8 +96,12 @@ export const useQuestions = (projectId: string | undefined) => {
 
     return {
         questions,
+        answeredQuestions,
+        unansweredMemberQuestions,
         loading,
+        memberLoading,
         fetchUnansweredQuestions,
+        fetchMemberQuestions,
         reportQuestion,
         resolveQuestion
     };

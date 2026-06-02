@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import apiClient from "@/lib/api";
 import ReactMarkdown from "react-markdown";
@@ -27,10 +27,13 @@ import {
   CheckCircle2,
   AlertCircle,
   Key,
+  Upload,
+  Shield,
 } from "lucide-react";
 import { NeeshLogo } from "@/components/NeeshLogo";
 import { supabase } from "@/integrations/supabase/client";
-import chatbotAvatar from "@/assets/chatbot-avatar.png";
+import defaultChatbotAvatar from "@/assets/chatbot-avatar.png";
+import { useChatbotSettings } from "@/hooks/useChatbotSettings";
 
 import { useFAQs, type FAQ } from "@/hooks/useFAQs";
 import {
@@ -66,6 +69,8 @@ const Chatbot = () => {
   console.log(`[Chatbot] FAQs loading: ${faqsLoading}, FAQ count: ${faqs.length}`);
 
   const [activeTab, setActiveTab] = useState<"chat" | "faq" | "settings">("chat");
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
   const [editingFaqId, setEditingFaqId] = useState<string | null>(null);
   const [editingQuestion, setEditingQuestion] = useState("");
   const [editingAnswer, setEditingAnswer] = useState("");
@@ -83,10 +88,26 @@ const Chatbot = () => {
   ]);
   const [inputMessage, setInputMessage] = useState("");
 
-  // Chatbot settings
-  const [botName, setBotName] = useState("Health Blog Assistant");
-  const [welcomeMessage, setWelcomeMessage] = useState("Hello! I'm your AI assistant. How can I help you today? I've been trained on your project's knowledge base and can answer questions about it.");
-  const [primaryColor, setPrimaryColor] = useState("#6366f1");
+  // Chatbot settings via shared hook
+  const {
+    settings: chatbotSettings,
+    dirty: settingsDirty,
+    saveSuccess: settingsSaveSuccess,
+    updateField: updateChatbotField,
+    saveSettings: saveChatbotSettings,
+  } = useChatbotSettings(id);
+
+  // Derive convenience names
+  const botName = chatbotSettings.botName;
+  const welcomeMessage = chatbotSettings.welcomeMessage;
+  const primaryColor = chatbotSettings.primaryColor;
+  const botAvatarUrl = chatbotSettings.botAvatarUrl;
+
+  // Resolved avatar image
+  const resolvedAvatar = botAvatarUrl || defaultChatbotAvatar;
+
+  // Avatar file input ref
+  const avatarInputRef = useRef<HTMLInputElement>(null);
 
   // API Key settings
   const [selectedProvider, setSelectedProvider] = useState<LlmProvider>("OPENROUTER");
@@ -113,6 +134,23 @@ const Chatbot = () => {
     }
   }, [saveSuccess]);
 
+  // Sync initial welcome message when settings load
+  const initializationRef = useRef(false);
+  useEffect(() => {
+    if (chatbotSettings && welcomeMessage && !initializationRef.current) {
+      console.log(`[Chatbot] Syncing welcome message: ${welcomeMessage}`);
+      setMessages([
+        {
+          id: "1",
+          role: "bot",
+          content: welcomeMessage,
+          timestamp: new Date(),
+        },
+      ]);
+      initializationRef.current = true;
+    }
+  }, [chatbotSettings, welcomeMessage]);
+
   const handleSaveApiKey = async () => {
     const error = validateApiKeyFormat(selectedProvider, apiKeyInput);
     if (error) {
@@ -128,14 +166,26 @@ const Chatbot = () => {
     }
   };
 
+  // Get or create session ID for audience tracking
+  const getSessionId = () => {
+    let sid = sessionStorage.getItem(`chat_sid_${id}`);
+    if (!sid) {
+      sid = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      sessionStorage.setItem(`chat_sid_${id}`, sid);
+    }
+    return sid;
+  };
+
   const handleDeleteApiKey = async (provider: LlmProvider) => {
     if (confirm(`Are you sure you want to remove the ${getProviderDisplayName(provider)} API key?`)) {
       await deleteApiKeyFromBackend(provider);
     }
   };
 
-  const handleSendMessage = async () => {
-    if (!inputMessage.trim() || isLoading) {
+  const handleSendMessage = async (overrideMessage?: string) => {
+    const messageToSend = overrideMessage || inputMessage;
+    
+    if (!messageToSend.trim() || isLoading) {
       console.warn('[Chatbot] Cannot send message - empty input or already loading');
       return;
     }
@@ -143,7 +193,7 @@ const Chatbot = () => {
     const userMessage: ChatMessage = {
       id: String(Date.now()),
       role: "user",
-      content: inputMessage,
+      content: messageToSend,
       timestamp: new Date(),
     };
 
@@ -158,8 +208,16 @@ const Chatbot = () => {
 
     try {
       console.log('  🚀 API call starting...');
+      // Build memory logic excluding latest message
+      const historyPayload = messages.map(m => ({
+        role: m.role,
+        content: m.content
+      }));
+
       const response = await apiClient.post<any>(`/api/projects/${id}/chat`, {
         query: userMessage.content,
+        chat_history: historyPayload,
+        sessionId: getSessionId(), // Added for Audience tracking
       });
 
       console.log('  ✅ Response received from API');
@@ -206,8 +264,23 @@ const Chatbot = () => {
     }
   };
 
+  // Scroll chat to bottom when new messages arrive, but only if user is near bottom
+  useEffect(() => {
+    if (!chatContainerRef.current) return;
+    
+    const container = chatContainerRef.current;
+    const isAtBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 150;
+    
+    if (isAtBottom) {
+      container.scrollTo({
+        top: container.scrollHeight,
+        behavior: "smooth"
+      });
+    }
+  }, [messages, isLoading]);
+
   const handleFaqClick = (faq: FAQ) => {
-    setInputMessage(faq.question);
+    handleSendMessage(faq.question);
   };
 
   const startEditingFaq = (faq: FAQ) => {
@@ -217,10 +290,10 @@ const Chatbot = () => {
   };
 
   const saveFaqEdit = async () => {
-    if (editingFaqId && editingQuestion.trim() && editingAnswer.trim()) {
+    if (editingFaqId && editingQuestion.trim()) {
       await updateFAQ(editingFaqId, {
         question: editingQuestion.trim(),
-        answer: editingAnswer.trim(),
+        answer: "",
       });
       setEditingFaqId(null);
       setEditingQuestion("");
@@ -241,10 +314,10 @@ const Chatbot = () => {
   };
 
   const addNewFaq = async () => {
-    if (newFaqQuestion.trim() && newFaqAnswer.trim()) {
+    if (newFaqQuestion.trim()) {
       await createFAQ({
         question: newFaqQuestion.trim(),
-        answer: newFaqAnswer.trim(),
+        answer: "",
       });
       setNewFaqQuestion("");
       setNewFaqAnswer("");
@@ -266,7 +339,7 @@ const Chatbot = () => {
   const hasConfiguredKey = savedProviders.length > 0;
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="h-screen overflow-hidden bg-background flex flex-col">
       {/* Header */}
       <header className="h-16 bg-card border-b border-border/50 flex items-center justify-between px-6 shadow-sm">
         <div className="flex items-center gap-4">
@@ -288,16 +361,16 @@ const Chatbot = () => {
       </header>
 
       {/* Main Content */}
-      <div className="flex-1 flex">
+      <div className="flex-1 flex min-h-0">
         {/* Left Panel - Chat Interface */}
-        <div className="flex-1 flex flex-col bg-muted/20">
+        <div className="flex-1 flex flex-col bg-muted/20 min-h-0">
           {/* Chat Header */}
           <div className="p-4 bg-card border-b border-border/50 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <img
-                src={chatbotAvatar}
+                src={resolvedAvatar}
                 alt="Chatbot"
-                className="w-12 h-12 rounded-full bg-gradient-to-br from-primary/20 to-accent/20 p-1"
+                className="w-20 h-20 object-contain"
               />
               <div>
                 <h2 className="font-semibold text-foreground">{botName}</h2>
@@ -335,7 +408,7 @@ const Chatbot = () => {
           )}
 
           {/* Chat Messages */}
-          <ScrollArea className="flex-1 p-6">
+          <ScrollArea className="flex-1 p-6" viewportRef={chatContainerRef}>
             <div className="space-y-4 max-w-2xl mx-auto">
               {messages.map((message) => (
                 <div
@@ -344,9 +417,9 @@ const Chatbot = () => {
                 >
                   {message.role === "bot" ? (
                     <img
-                      src={chatbotAvatar}
+                      src={resolvedAvatar}
                       alt="Bot"
-                      className="w-10 h-10 rounded-full bg-gradient-to-br from-primary/20 to-accent/20 p-0.5 flex-shrink-0"
+                      className="w-16 h-16 flex-shrink-0 object-contain drop-shadow-sm"
                     />
                   ) : (
                     <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center flex-shrink-0">
@@ -354,22 +427,22 @@ const Chatbot = () => {
                     </div>
                   )}
                   <div
-                    className={`max-w-[70%] p-4 rounded-2xl ${message.role === "user"
-                      ? "bg-primary text-primary-foreground rounded-tr-md"
+                    className={`w-fit max-w-[85%] sm:max-w-[75%] p-4 rounded-2xl flex flex-col text-left overflow-hidden ${message.role === "user"
+                      ? "bg-primary text-primary-foreground rounded-tr-md ml-auto"
                       : message.isError
-                        ? "bg-destructive/10 border border-destructive/30 rounded-tl-md"
-                        : "bg-card border border-border/50 rounded-tl-md"
+                        ? "bg-destructive/10 border border-destructive/30 rounded-tl-md mr-auto"
+                        : "bg-card border border-border/50 rounded-tl-md shadow-sm mr-auto block"
                       }`}
                   >
                     {message.role === "bot" ? (
-                      <div className="text-sm prose prose-sm dark:prose-invert max-w-none [&>p]:mb-2 [&>p:last-child]:mb-0 [&>ul]:mb-2 [&>ol]:mb-2 [&>ul]:pl-4 [&>ol]:pl-4 [&>li]:mb-1">
+                      <div className="text-sm prose prose-sm dark:prose-invert max-w-none text-left w-full break-words [&>p]:mb-3 [&>p:last-child]:mb-0 [&>ul]:mb-3 [&>ol]:mb-3 [&>ul]:pl-6 [&>ol]:pl-6 [&>li]:mb-2 [&>ul>li]:list-disc [&>ol>li]:list-decimal leading-relaxed">
                         <ReactMarkdown>{message.content}</ReactMarkdown>
                       </div>
                     ) : (
-                      <p className="text-sm">{message.content}</p>
+                      <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
                     )}
                     <p
-                      className={`text-xs mt-2 ${message.role === "user" ? "text-primary-foreground/70" : "text-muted-foreground"
+                      className={`text-xs mt-2 text-right ${message.role === "user" ? "text-primary-foreground/70" : "text-muted-foreground"
                         }`}
                     >
                       {message.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
@@ -380,9 +453,9 @@ const Chatbot = () => {
               {isLoading && (
                 <div className="flex gap-3">
                   <img
-                    src={chatbotAvatar}
+                    src={resolvedAvatar}
                     alt="Bot"
-                    className="w-10 h-10 rounded-full bg-gradient-to-br from-primary/20 to-accent/20 p-0.5 flex-shrink-0"
+                    className="w-16 h-16 flex-shrink-0 object-contain drop-shadow-sm"
                   />
                   <div className="bg-card border border-border/50 rounded-2xl rounded-tl-md p-4">
                     <div className="flex items-center gap-1">
@@ -393,6 +466,7 @@ const Chatbot = () => {
                   </div>
                 </div>
               )}
+              <div ref={chatEndRef} />
             </div>
           </ScrollArea>
 
@@ -431,9 +505,9 @@ const Chatbot = () => {
         </div>
 
         {/* Right Panel - Tabs */}
-        <div className="w-96 bg-card border-l border-border/50 flex flex-col">
+        <div className="w-96 bg-card border-l border-border/50 flex flex-col shrink-0 min-h-0 min-w-0 h-full">
           {/* Tabs */}
-          <div className="flex border-b border-border/50">
+          <div className="flex border-b border-border/50 shrink-0">
             <button
               onClick={() => setActiveTab("chat")}
               className={`flex-1 py-4 text-sm font-medium transition-colors ${activeTab === "chat"
@@ -467,14 +541,14 @@ const Chatbot = () => {
           </div>
 
           {/* Tab Content */}
-          <ScrollArea className="flex-1">
+          <div className="flex-1 overflow-y-auto min-h-0">
             {activeTab === "chat" && (
               <div className="p-6 space-y-4">
                 <div className="text-center py-8">
                   <img
-                    src={chatbotAvatar}
+                    src={resolvedAvatar}
                     alt="Chatbot"
-                    className="w-24 h-24 mx-auto mb-4"
+                    className="w-64 h-64 mx-auto mb-4 object-contain drop-shadow-[0_0_30px_rgba(9,218,237,0.5)]"
                   />
                   <h3 className="font-display font-semibold text-lg mb-2">Test Your Chatbot</h3>
                   <p className="text-sm text-muted-foreground">
@@ -519,12 +593,6 @@ const Chatbot = () => {
                       value={newFaqQuestion}
                       onChange={(e) => setNewFaqQuestion(e.target.value)}
                     />
-                    <Textarea
-                      placeholder="Answer"
-                      value={newFaqAnswer}
-                      onChange={(e) => setNewFaqAnswer(e.target.value)}
-                      className="min-h-[80px] resize-none"
-                    />
                     <div className="flex gap-2">
                       <Button size="sm" className="rounded-xl flex-1" onClick={addNewFaq}>
                         <Check className="w-4 h-4 mr-1" />
@@ -560,12 +628,6 @@ const Chatbot = () => {
                             onChange={(e) => setEditingQuestion(e.target.value)}
                             placeholder="Question"
                           />
-                          <Textarea
-                            value={editingAnswer}
-                            onChange={(e) => setEditingAnswer(e.target.value)}
-                            placeholder="Answer"
-                            className="min-h-[80px] resize-none"
-                          />
                           <div className="flex gap-2">
                             <Button size="sm" className="rounded-xl flex-1" onClick={saveFaqEdit}>
                               <Check className="w-4 h-4 mr-1" />
@@ -599,7 +661,6 @@ const Chatbot = () => {
                               </Button>
                             </div>
                           </div>
-                          <p className="text-sm text-muted-foreground">{faq.answer}</p>
                         </>
                       )}
                     </div>
@@ -633,9 +694,9 @@ const Chatbot = () => {
                         className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
                         id="llm-provider-select"
                       >
-                        {PROVIDER_CATEGORIES.map((category) => (
+                        {PROVIDER_CATEGORIES.map((category: any) => (
                           <optgroup key={category.category} label={category.category}>
-                            {category.providers.map((opt) => (
+                            {category.providers.map((opt: any) => (
                               <option key={opt.id} value={opt.id}>
                                 {opt.name}
                               </option>
@@ -730,6 +791,12 @@ const Chatbot = () => {
                           <div className="flex items-center gap-2">
                             <CheckCircle2 className="w-4 h-4 text-green-500" />
                             <span className="text-sm font-medium">{getProviderDisplayName(sp.provider)}</span>
+                            {sp.provider === "GEMINI" && (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+                                <Shield className="w-3 h-3" />
+                                Default
+                              </span>
+                            )}
                           </div>
                           <Button
                             variant="ghost"
@@ -745,80 +812,128 @@ const Chatbot = () => {
                   )}
                 </div>
 
+                {/* Additional Chatbot Settings */}
                 <div className="border-t border-border/50" />
 
-                {/* Existing Chatbot Settings */}
-                <div>
-                  <h3 className="font-semibold mb-4">Chatbot Settings</h3>
-                  <div className="space-y-4">
+                    {/* Existing Chatbot Settings */}
                     <div>
-                      <label className="text-sm font-medium text-muted-foreground mb-2 block">
-                        Bot Name
-                      </label>
-                      <Input
-                        value={botName}
-                        onChange={(e) => setBotName(e.target.value)}
-                        placeholder="Enter bot name"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium text-muted-foreground mb-2 block">
-                        Welcome Message
-                      </label>
-                      <Textarea
-                        value={welcomeMessage}
-                        onChange={(e) => setWelcomeMessage(e.target.value)}
-                        placeholder="Enter welcome message"
-                        className="min-h-[100px] resize-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-sm font-medium text-muted-foreground mb-2 block">
-                        Primary Color
-                      </label>
-                      <div className="flex gap-3">
-                        <input
-                          type="color"
-                          value={primaryColor}
-                          onChange={(e) => setPrimaryColor(e.target.value)}
-                          className="w-12 h-12 rounded-xl border border-border cursor-pointer"
-                        />
-                        <Input
-                          value={primaryColor}
-                          onChange={(e) => setPrimaryColor(e.target.value)}
-                          className="flex-1"
-                        />
+                      <h3 className="font-semibold mb-4">Chatbot Settings</h3>
+                      <div className="space-y-4">
+                        <div>
+                          <label className="text-sm font-medium text-muted-foreground mb-2 block">
+                            Bot Name
+                          </label>
+                          <Input
+                            value={botName}
+                            onChange={(e) => updateChatbotField('botName', e.target.value)}
+                            placeholder="Enter bot name"
+                            id="chatbot-bot-name"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium text-muted-foreground mb-2 block">
+                            Welcome Message
+                          </label>
+                          <Textarea
+                            value={welcomeMessage}
+                            onChange={(e) => updateChatbotField('welcomeMessage', e.target.value)}
+                            placeholder="Enter welcome message"
+                            className="min-h-[100px] resize-none"
+                            id="chatbot-welcome-msg"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-sm font-medium text-muted-foreground mb-2 block">
+                            Primary Color
+                          </label>
+                          <div className="flex gap-3">
+                            <input
+                              type="color"
+                              value={primaryColor}
+                              onChange={(e) => updateChatbotField('primaryColor', e.target.value)}
+                              className="w-12 h-12 rounded-xl border border-border cursor-pointer"
+                            />
+                            <Input
+                              value={primaryColor}
+                              onChange={(e) => updateChatbotField('primaryColor', e.target.value)}
+                              className="flex-1"
+                            />
+                          </div>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                </div>
 
-                <div className="pt-4 border-t border-border/50">
-                  <h4 className="font-medium mb-3">Bot Avatar</h4>
-                  <div className="flex items-center gap-4">
-                    <img
-                      src={chatbotAvatar}
-                      alt="Bot Avatar"
-                      className="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary/20 to-accent/20 p-2"
-                    />
-                    <div>
-                      <Button variant="outline" size="sm" className="rounded-xl">
-                        Change Avatar
-                      </Button>
-                      <p className="text-xs text-muted-foreground mt-2">
-                        PNG, JPG (max 2MB)
-                      </p>
+                    <div className="pt-4 border-t border-border/50">
+                      <h4 className="font-medium mb-3">Bot Avatar</h4>
+                      <div className="flex items-center gap-4">
+                        <img
+                          src={resolvedAvatar}
+                          alt="Bot Avatar"
+                          className="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary/20 to-accent/20 p-2 object-cover"
+                        />
+                        <div>
+                          <input
+                            ref={avatarInputRef}
+                            type="file"
+                            accept="image/png,image/jpeg"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (!file) return;
+                              if (file.size > 10 * 1024 * 1024) {
+                                alert('File too large. Max 10MB.');
+                                return;
+                              }
+                              const reader = new FileReader();
+                              reader.onload = (ev) => {
+                                const dataUrl = ev.target?.result as string;
+                                updateChatbotField('botAvatarUrl', dataUrl);
+                              };
+                              reader.readAsDataURL(file);
+                            }}
+                          />
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="rounded-xl gap-2"
+                            onClick={() => avatarInputRef.current?.click()}
+                          >
+                            <Upload className="w-4 h-4" />
+                            Change Avatar
+                          </Button>
+                          <p className="text-xs text-muted-foreground mt-2">
+                            PNG, JPG (max 10MB)
+                          </p>
+                          {botAvatarUrl && (
+                            <button
+                              className="text-xs text-destructive hover:underline mt-1"
+                              onClick={() => updateChatbotField('botAvatarUrl', null)}
+                            >
+                              Reset to default
+                            </button>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
 
-                <Button className="w-full rounded-xl">
-                  <Check className="w-4 h-4 mr-2" />
-                  Save Settings
-                </Button>
-              </div>
+                    <Button
+                      className="w-full rounded-xl"
+                      onClick={saveChatbotSettings}
+                      disabled={!settingsDirty}
+                      id="save-chatbot-settings-btn"
+                    >
+                      <Check className="w-4 h-4 mr-2" />
+                      {settingsDirty ? 'Save Settings' : 'Settings Saved'}
+                    </Button>
+                    {settingsSaveSuccess && (
+                      <p className="text-xs text-green-500 flex items-center gap-1 justify-center">
+                        <CheckCircle2 className="w-3 h-3" />
+                        Settings saved! Changes reflected in real time.
+                      </p>
+                    )}
+                </div>
             )}
-          </ScrollArea>
+          </div>
         </div>
       </div>
     </div>

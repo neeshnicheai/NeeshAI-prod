@@ -23,6 +23,10 @@ export interface Blog {
   introduction: string | null;
   content: string | null;
   custom_fields: CustomField[];
+  chatbot_name?: string | null;
+  welcome_message?: string | null;
+  primary_color?: string | null;
+  bot_avatar_url?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -42,6 +46,10 @@ interface BackendBlogContent {
   introduction: string;
   content: string;
   customFields: CustomField[];
+  chatbotName?: string;
+  welcomeMessage?: string;
+  primaryColor?: string;
+  botAvatarUrl?: string;
 }
 
 export const useBlogs = () => {
@@ -58,6 +66,10 @@ export const useBlogs = () => {
       introduction: backendData.introduction,
       content: backendData.content,
       custom_fields: backendData.customFields || [],
+      chatbot_name: backendData.chatbotName || null,
+      welcome_message: backendData.welcomeMessage || null,
+      primary_color: backendData.primaryColor || null,
+      bot_avatar_url: backendData.botAvatarUrl || null,
       created_at: new Date().toISOString(), // Mocked
       updated_at: new Date().toISOString(), // Mocked
     };

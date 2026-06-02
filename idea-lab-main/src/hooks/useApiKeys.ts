@@ -26,7 +26,13 @@ export const PROVIDER_CATEGORIES = [
       { id: "OPENROUTER", name: "OpenRouter" },
       { id: "OPENAI", name: "OpenAI" },
       { id: "CLAUDE", name: "Anthropic Claude" },
-      { id: "GEMINI", name: "Google DeepMind (Gemini)" },
+      { id: "GEMINI", name: "Google DeepMind (Gemini)", isDefault: true },
+      { id: "GEMINI_25_PRO", name: "  └ Gemini 2.5 Pro" },
+      { id: "GEMINI_25_FLASH", name: "  └ Gemini 2.5 Flash" },
+      { id: "GEMINI_20_FLASH", name: "  └ Gemini 2.0 Flash" },
+      { id: "GEMINI_20_FLASH_LITE", name: "  └ Gemini 2.0 Flash-Lite" },
+      { id: "GEMINI_15_PRO", name: "  └ Gemini 1.5 Pro" },
+      { id: "GEMINI_15_FLASH", name: "  └ Gemini 1.5 Flash" },
       { id: "AZURE_OPENAI", name: "Microsoft Azure OpenAI" },
       { id: "META", name: "Meta (LLaMA via partners)" },
       { id: "MISTRAL", name: "Mistral AI" },
@@ -181,6 +187,30 @@ const API_KEY_VALIDATORS: Record<string, { regex: RegExp; hint: string }> = {
         hint: 'Claude/Anthropic keys start with "sk-ant-"',
     },
     GEMINI: {
+        regex: /^AIzaSy[A-Za-z0-9_-]{33}$/,
+        hint: 'Gemini keys start with "AIzaSy" and are 39 characters long',
+    },
+    GEMINI_25_PRO: {
+        regex: /^AIzaSy[A-Za-z0-9_-]{33}$/,
+        hint: 'Gemini keys start with "AIzaSy" and are 39 characters long',
+    },
+    GEMINI_25_FLASH: {
+        regex: /^AIzaSy[A-Za-z0-9_-]{33}$/,
+        hint: 'Gemini keys start with "AIzaSy" and are 39 characters long',
+    },
+    GEMINI_20_FLASH: {
+        regex: /^AIzaSy[A-Za-z0-9_-]{33}$/,
+        hint: 'Gemini keys start with "AIzaSy" and are 39 characters long',
+    },
+    GEMINI_20_FLASH_LITE: {
+        regex: /^AIzaSy[A-Za-z0-9_-]{33}$/,
+        hint: 'Gemini keys start with "AIzaSy" and are 39 characters long',
+    },
+    GEMINI_15_PRO: {
+        regex: /^AIzaSy[A-Za-z0-9_-]{33}$/,
+        hint: 'Gemini keys start with "AIzaSy" and are 39 characters long',
+    },
+    GEMINI_15_FLASH: {
         regex: /^AIzaSy[A-Za-z0-9_-]{33}$/,
         hint: 'Gemini keys start with "AIzaSy" and are 39 characters long',
     },

@@ -57,6 +57,7 @@ import {
   Megaphone,
   Lock,
   Trash2,
+  PartyPopper,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useProjects, type Project } from "@/hooks/useProjects";
@@ -66,6 +67,7 @@ import { usePromotions } from "@/hooks/usePromotions";
 import { usePaymentVerification } from "@/hooks/usePayments";
 import { toast } from "sonner";
 import { NeeshLogo } from "@/components/NeeshLogo";
+import { BetaBadge } from "@/components/BetaBadge";
 import { generateShareableUrl } from "@/lib/slugify";
 import apiClient from "@/lib/api";
 
@@ -122,10 +124,10 @@ const Dashboard = () => {
   const { verifying } = usePaymentVerification();
   const [helpOpen, setHelpOpen] = useState(false);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [betaUpgradeSuccess, setBetaUpgradeSuccess] = useState(false);
+  const [isUpgrading, setIsUpgrading] = useState(false);
   const [promoteOpen, setPromoteOpen] = useState(false);
   const [promoteProjectId, setPromoteProjectId] = useState<string | null>(null);
-  const [promoteTags, setPromoteTags] = useState<string[]>([]);
-  const [promoteTagInput, setPromoteTagInput] = useState("");
   const [isPromoting, setIsPromoting] = useState(false);
   const navigate = useNavigate();
 
@@ -137,25 +139,38 @@ const Dashboard = () => {
     if (!projects?.length) return;
 
     const fetchMissingCoverImages = async () => {
-      const updates: Record<string, string> = {};
-      for (const project of projects) {
-        // Skip if already in localStorage
-        if (getProjectCoverImage(project.id)) continue;
-        try {
-          const blogData = await apiClient.get<{ coverImageUrl?: string }>(
-            `/api/projects/${project.id}/blog`
-          );
-          if (blogData?.coverImageUrl) {
-            updates[project.id] = blogData.coverImageUrl;
-            // Cache in localStorage for future use
-            localStorage.setItem(`cover-image-${project.id}`, blogData.coverImageUrl);
+      console.log("[Dashboard] Checking for missing cover images...");
+      const missingProjects = projects.filter(p => !getProjectCoverImage(p.id));
+      
+      if (missingProjects.length === 0) return;
+
+      try {
+        const results = await Promise.all(
+          missingProjects.map(async (project) => {
+            try {
+              const blogData = await apiClient.get<{ coverImageUrl?: string }>(
+                `/api/projects/${project.id}/blog`
+              );
+              return { id: project.id, url: blogData?.coverImageUrl || null };
+            } catch {
+              return { id: project.id, url: null };
+            }
+          })
+        );
+
+        const updates: Record<string, string> = {};
+        results.forEach(result => {
+          if (result.url) {
+            updates[result.id] = result.url;
+            localStorage.setItem(`cover-image-${result.id}`, result.url);
           }
-        } catch {
-          // Blog not found or error — skip
+        });
+
+        if (Object.keys(updates).length > 0) {
+          setCoverImages(prev => ({ ...prev, ...updates }));
         }
-      }
-      if (Object.keys(updates).length > 0) {
-        setCoverImages(prev => ({ ...prev, ...updates }));
+      } catch (error) {
+        console.error("[Dashboard] Error fetching cover images:", error);
       }
     };
 
@@ -216,23 +231,29 @@ const Dashboard = () => {
     }
   };
 
-  const handleUpgrade = () => {
-    navigate("/pricing");
-    setUpgradeOpen(false);
+  const handleUpgrade = async () => {
+    setIsUpgrading(true);
+    const success = await upgradeToPro();
+    setIsUpgrading(false);
+    if (success) {
+      setUpgradeOpen(false);
+      setBetaUpgradeSuccess(true);
+      refetchSubscription();
+    } else {
+      toast.error("Failed to upgrade. Please try again.");
+    }
   };
 
   const handlePromoteBlog = async () => {
-    if (!promoteProjectId || promoteTags.length === 0) {
-      toast.error("Please select a project and add at least one tag.");
+    if (!promoteProjectId) {
+      toast.error("Please select a project.");
       return;
     }
     setIsPromoting(true);
     try {
-      await submitPromotion(promoteProjectId, promoteTags);
+      await submitPromotion(promoteProjectId);
       toast.success("Blog promoted successfully! It will appear in 'More Like This' sections.");
       setPromoteOpen(false);
-      setPromoteTags([]);
-      setPromoteTagInput("");
       setPromoteProjectId(null);
     } catch (err: any) {
       toast.error(err?.message || "Failed to promote blog.");
@@ -241,20 +262,7 @@ const Dashboard = () => {
     }
   };
 
-  const handleAddTag = () => {
-    const tag = promoteTagInput.trim().toLowerCase();
-    if (!tag) return;
-    if (promoteTags.length >= 5) {
-      toast.error("Maximum 5 tags allowed.");
-      return;
-    }
-    if (promoteTags.includes(tag)) {
-      toast.error("Tag already added.");
-      return;
-    }
-    setPromoteTags(prev => [...prev, tag]);
-    setPromoteTagInput("");
-  };
+
 
   const handleSignOut = async () => {
     const { error } = await signOut();
@@ -321,6 +329,7 @@ const Dashboard = () => {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <NeeshLogo size="md" />
+              <BetaBadge variant="glow" type="beta" />
               <span className="text-sm text-muted-foreground hidden sm:block">
                 AI-powered content & niche projects
               </span>
@@ -381,9 +390,7 @@ const Dashboard = () => {
                   }}>
                     <Plus className="w-4 h-4" />
                     New Project
-                    {isFree && subscription && (
-                      <span className="ml-1 text-xs opacity-70">({projects.length}/5)</span>
-                    )}
+                    <BetaBadge variant="static" type="beta" className="ml-1.5" />
                   </Button>
                 </DialogTrigger>
                 <DialogContent className="sm:max-w-lg">
@@ -482,7 +489,7 @@ const Dashboard = () => {
         </div>
       </header>
 
-      {/* Upgrade Modal */}
+      {/* Upgrade Modal — Beta instant upgrade */}
       <Dialog open={upgradeOpen} onOpenChange={setUpgradeOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -491,12 +498,15 @@ const Dashboard = () => {
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 mt-2">
-            <div className="p-4 rounded-xl bg-gradient-to-r from-blue-600/10 via-indigo-600/10 to-red-500/10 border border-blue-500/20">
-              <p className="text-sm text-foreground font-medium mb-2">
-                You've reached the free plan limit of 5 projects.
-              </p>
+            <div className="p-4 rounded-xl bg-gradient-to-r from-emerald-600/10 via-green-600/10 to-teal-500/10 border border-emerald-500/20">
+              <div className="flex items-center gap-2 mb-2">
+                <BetaBadge variant="glow" type="beta" />
+                <p className="text-sm text-foreground font-medium">
+                  Free during Beta!
+                </p>
+              </div>
               <p className="text-xs text-muted-foreground">
-                Upgrade to Pro for <span className="font-bold text-foreground">$9.99/month</span> and unlock:
+                Since Neesh AI is in Beta, all Pro features are completely free. Upgrade now to unlock:
               </p>
               <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
                 <li className="flex items-center gap-2"><span className="text-green-500">✓</span> Unlimited projects</li>
@@ -509,10 +519,35 @@ const Dashboard = () => {
               <Button variant="outline" onClick={() => setUpgradeOpen(false)} className="flex-1">
                 Maybe Later
               </Button>
-              <Button onClick={handleUpgrade} className="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white">
-                Upgrade Now ⚡
+              <Button onClick={handleUpgrade} disabled={isUpgrading} className="flex-1 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white">
+                {isUpgrading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                Upgrade Free ⚡
               </Button>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Beta Upgrade Success Modal */}
+      <Dialog open={betaUpgradeSuccess} onOpenChange={setBetaUpgradeSuccess}>
+        <DialogContent className="sm:max-w-md">
+          <div className="flex flex-col items-center text-center py-4">
+            <div className="w-16 h-16 rounded-full bg-gradient-to-br from-emerald-500/20 to-green-500/20 flex items-center justify-center mb-4">
+              <PartyPopper className="w-8 h-8 text-emerald-500" />
+            </div>
+            <h2 className="font-display text-2xl font-bold text-foreground mb-2">
+              🎉 Welcome to Pro!
+            </h2>
+            <BetaBadge variant="glow" type="beta" className="mb-3" />
+            <p className="text-sm text-muted-foreground leading-relaxed max-w-sm">
+              Since Neesh AI is currently in <strong className="text-foreground">Beta</strong>, the Pro plan is free for you! Enjoy unlimited projects, custom branding, cross-promotion, and all premium features.
+            </p>
+            <Button
+              onClick={() => setBetaUpgradeSuccess(false)}
+              className="mt-6 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white px-8"
+            >
+              Let's Go! 🚀
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -527,7 +562,7 @@ const Dashboard = () => {
           </DialogHeader>
           <div className="space-y-4 mt-2">
             <p className="text-sm text-muted-foreground">
-              Your blog will appear in the "More Like This" section of blogs with matching tags.
+              Your blog will appear in the "More Like This" section of all other published blogs.
             </p>
             <div className="space-y-2">
               <label className="text-sm font-medium">Select Project</label>
@@ -542,31 +577,7 @@ const Dashboard = () => {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Tags (max 5)</label>
-              <div className="flex gap-2">
-                <Input
-                  placeholder="Add a tag (e.g. AI, Marketing)"
-                  value={promoteTagInput}
-                  onChange={(e) => setPromoteTagInput(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), handleAddTag())}
-                />
-                <Button type="button" variant="outline" size="icon" onClick={handleAddTag} disabled={promoteTags.length >= 5}>
-                  <Plus className="w-4 h-4" />
-                </Button>
-              </div>
-              {promoteTags.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mt-2">
-                  {promoteTags.map(tag => (
-                    <span key={tag} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-primary/10 text-primary text-xs font-medium">
-                      {tag}
-                      <button onClick={() => setPromoteTags(prev => prev.filter(t => t !== tag))} className="hover:text-destructive">×</button>
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-            <Button onClick={handlePromoteBlog} className="w-full" disabled={isPromoting || !promoteProjectId || promoteTags.length === 0}>
+            <Button onClick={handlePromoteBlog} className="w-full" disabled={isPromoting || !promoteProjectId}>
               {isPromoting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
               Promote Blog
             </Button>
@@ -576,25 +587,6 @@ const Dashboard = () => {
 
       {/* Main Content */}
       <main className="container mx-auto px-6 py-8">
-        {/* Subscription Banner for Pro users */}
-        {isPro && (
-          <div className="mb-6 p-4 rounded-xl bg-gradient-to-r from-blue-600/5 via-indigo-600/5 to-transparent border border-blue-500/20 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <span className="px-2.5 py-1 rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-xs font-bold">PRO</span>
-              <div className="flex flex-col">
-                <span className="text-sm text-muted-foreground">You have unlimited projects and promotion access.</span>
-                {daysRemaining !== null && (
-                  <span className={`text-xs font-medium mt-0.5 ${daysRemaining <= 5 ? 'text-red-500' : daysRemaining <= 10 ? 'text-blue-500' : 'text-muted-foreground'}`}>
-                    ⏳ {daysRemaining > 0 ? `Expires in ${daysRemaining} day${daysRemaining !== 1 ? 's' : ''}` : 'Subscription expired'}
-                  </span>
-                )}
-              </div>
-            </div>
-            <Button variant="outline" size="sm" onClick={() => setPromoteOpen(true)} className="gap-1.5">
-              🚀 Promote a Blog
-            </Button>
-          </div>
-        )}
 
         {/* Title and filters */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
@@ -745,19 +737,28 @@ const Dashboard = () => {
                 <Megaphone className="w-5 h-5 text-blue-600" />
               </div>
               <div>
-                <h2 className="font-display text-xl font-bold text-foreground flex items-center gap-2">
-                  Cross-Promotion Engine
+                <div className="flex items-center gap-2">
+                  <h2 className="font-display text-xl font-bold text-foreground">
+                    Cross-Promotion Engine
+                  </h2>
                   {isPro && (
-                    <span className="px-2 py-0.5 rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-[10px] font-bold">PRO</span>
+                    <span className="px-2 py-0.5 rounded-full bg-[#09daed]/10 text-[#09daed] text-[10px] font-bold border border-[#09daed]/20">PRO</span>
                   )}
-                </h2>
-                <p className="text-sm text-muted-foreground">
-                  Promote your blogs in other users' "More Like This" sections
-                </p>
+                </div>
+                <div className="flex flex-col">
+                  <p className="text-sm text-muted-foreground">
+                    Promote your blogs in other users' "More Like This" sections
+                  </p>
+                  {isPro && daysRemaining !== null && (
+                    <span className={`text-[10px] font-medium mt-0.5 ${daysRemaining <= 5 ? 'text-red-500' : 'text-[#09daed]'}`}>
+                      ⏳ {daysRemaining > 0 ? `PRO status expires in ${daysRemaining} day${daysRemaining !== 1 ? 's' : ''}` : 'Subscription expired'}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
             {isPro && (
-              <Button onClick={() => setPromoteOpen(true)} className="gap-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white">
+              <Button onClick={() => setPromoteOpen(true)} className="gap-1.5 shadow-sm">
                 <Plus className="w-4 h-4" />
                 Add Project
               </Button>
@@ -767,9 +768,9 @@ const Dashboard = () => {
           {isPro ? (
             // ── Pro users: show managed promotions ──
             <div>
-              {promotions.length > 0 ? (
+              {promotions.filter(p => p.status === 'ACTIVE').length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {promotions.map((promo) => {
+                  {promotions.filter(p => p.status === 'ACTIVE').map((promo) => {
                     const project = projects.find(p => p.id === promo.projectId);
                     const coverImg = project ? (getProjectCoverImage(project.id) || coverImages[project.id]) : promo.coverImageUrl;
                     return (
@@ -778,7 +779,7 @@ const Dashboard = () => {
                         className="relative bg-card rounded-xl border border-blue-500/20 overflow-hidden group hover:shadow-lg transition-all"
                       >
                         {/* Cover */}
-                        <div className="h-32 overflow-hidden bg-gradient-to-br from-blue-600/10 via-indigo-600/10 to-muted">
+                        <div className="relative h-32 overflow-hidden bg-gradient-to-br from-blue-600/10 via-indigo-600/10 to-muted">
                           {coverImg ? (
                             <img src={coverImg} alt={promo.blogTitle} className="w-full h-full object-cover" loading="lazy" />
                           ) : (
@@ -793,14 +794,7 @@ const Dashboard = () => {
                         <div className="p-4">
                           <h4 className="font-semibold text-sm mb-2 line-clamp-1">{promo.blogTitle}</h4>
 
-                          {/* Tags */}
-                          <div className="flex flex-wrap gap-1 mb-3">
-                            {promo.tags.map(tag => (
-                              <span key={tag} className="text-[10px] px-2 py-0.5 rounded-full bg-blue-600/10 text-blue-700 font-medium">
-                                {tag}
-                              </span>
-                            ))}
-                          </div>
+                          {/* Tags display removed */}
 
                           {/* Status + Remove */}
                           <div className="flex items-center justify-between">
@@ -808,15 +802,30 @@ const Dashboard = () => {
                               {promo.status === 'ACTIVE' ? '● Live' : promo.status}
                             </span>
                             <button
-                              onClick={async () => {
+                              type="button"
+                              onClick={async (e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                console.log("[Dashboard] Remove button clicked for promotion ID:", promo.id);
+                                if (!window.confirm(`Are you sure you want to remove this promotion?\nTitle: ${promo.blogTitle}`)) {
+                                  console.log("[Dashboard] Removal cancelled by user.");
+                                  return;
+                                }
+                                console.log("[Dashboard] Proceeding with removal...");
                                 const ok = await removePromotion(promo.id);
-                                if (ok) toast.success("Promotion removed.");
-                                else toast.error("Failed to remove promotion.");
+                                if (ok) {
+                                  console.log("[Dashboard] Promotion removal successful.");
+                                  toast.success("Promotion removed.");
+                                } else {
+                                  console.error("[Dashboard] Promotion removal failed.");
+                                  toast.error("Failed to remove promotion.");
+                                }
                               }}
-                              className="p-1.5 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+                              className="p-2 rounded-lg bg-red-50 text-red-500 hover:bg-red-500 hover:text-white transition-all shadow-sm border border-red-100 flex items-center gap-1.5"
                               title="Remove promotion"
                             >
-                              <Trash2 className="w-4 h-4" />
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span className="text-[10px] font-bold">Remove</span>
                             </button>
                           </div>
                         </div>
@@ -833,7 +842,7 @@ const Dashboard = () => {
                   <p className="text-sm text-muted-foreground mb-4 max-w-sm mx-auto">
                     Add your projects here to promote them in other users' blogs under "More Like This" sections.
                   </p>
-                  <Button onClick={() => setPromoteOpen(true)} className="gap-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white">
+                  <Button onClick={() => setPromoteOpen(true)} className="gap-1.5 shadow-sm">
                     <Plus className="w-4 h-4" />
                     Promote Your First Project
                   </Button>
@@ -849,11 +858,13 @@ const Dashboard = () => {
                   <Lock className="w-7 h-7 text-muted-foreground" />
                 </div>
                 <h3 className="font-semibold text-lg text-foreground mb-1">Pro Feature</h3>
+                <BetaBadge variant="glow" type="beta" className="mb-2" />
                 <p className="text-sm text-muted-foreground mb-4 max-w-sm text-center">
-                  Upgrade to Pro ($9.99/month) to promote your blogs across the Neesh AI network.
+                  Free during Beta! Upgrade to Pro to promote your blogs across the Neesh AI network.
                 </p>
-                <Button onClick={handleUpgrade} className="gap-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white">
-                  Upgrade to Pro ⚡
+                <Button onClick={() => setUpgradeOpen(true)} disabled={isUpgrading} className="gap-1.5 bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white">
+                  {isUpgrading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                  Upgrade Free ⚡
                 </Button>
               </div>
 

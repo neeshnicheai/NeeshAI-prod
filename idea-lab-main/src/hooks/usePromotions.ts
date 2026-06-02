@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "./useAuth";
 import apiClient from "@/lib/api";
 
@@ -28,20 +28,34 @@ export const usePromotions = () => {
   const [promotions, setPromotions] = useState<Promotion[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const fetchPromotions = useCallback(async () => {
+  // Guard against duplicate fetches
+  const lastFetchedUserIdRef = useRef<string | null>(null);
+  const isFetchingRef = useRef(false);
+
+  const fetchPromotions = useCallback(async (force = false) => {
     if (!user) {
       setPromotions([]);
+      lastFetchedUserIdRef.current = null;
       return;
     }
+
+    if (!force && lastFetchedUserIdRef.current === user.id) {
+      return;
+    }
+
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
 
     try {
       setLoading(true);
       const data = await apiClient.get<Promotion[]>('/api/promotions');
       setPromotions(data);
+      lastFetchedUserIdRef.current = user.id;
     } catch (err) {
       console.error("[usePromotions] Error fetching promotions:", err);
     } finally {
       setLoading(false);
+      isFetchingRef.current = false;
     }
   }, [user?.id]);
 
@@ -49,9 +63,9 @@ export const usePromotions = () => {
     fetchPromotions();
   }, [fetchPromotions]);
 
-  const submitPromotion = async (projectId: string, tags: string[]): Promise<Promotion | null> => {
+  const submitPromotion = async (projectId: string): Promise<Promotion | null> => {
     try {
-      const result = await apiClient.post<Promotion>('/api/promotions', { projectId, tags });
+      const result = await apiClient.post<Promotion>('/api/promotions', { projectId, tags: [] });
       await fetchPromotions();
       return result;
     } catch (err) {
@@ -62,8 +76,14 @@ export const usePromotions = () => {
 
   const removePromotion = async (promotionId: string): Promise<boolean> => {
     try {
-      await apiClient.delete(`/api/promotions/${promotionId}`);
-      setPromotions(prev => prev.filter(p => p.id !== promotionId));
+      console.log(`[usePromotions] Attempting to remove promotion with ID: ${promotionId}`);
+      const response = await apiClient.delete(`/api/promotions/${promotionId}`);
+      console.log("[usePromotions] API response received:", response);
+      setPromotions(prev => {
+        const next = prev.filter(p => p.id !== promotionId);
+        console.log(`[usePromotions] Local state updated. Count: ${prev.length} -> ${next.length}`);
+        return next;
+      });
       return true;
     } catch (err) {
       console.error("[usePromotions] Error removing promotion:", err);

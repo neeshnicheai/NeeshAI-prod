@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useAuth } from "./useAuth";
 import apiClient from "@/lib/api";
 
 export interface UserProfile {
@@ -25,21 +26,37 @@ export interface UpdateProfileData {
 }
 
 export const useProfile = () => {
+    const { user } = useAuth();
     const [profile, setProfile] = useState<UserProfile | null>(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
 
-    const fetchProfile = useCallback(async () => {
+    // Guard against duplicate fetches
+    const lastFetchedUserIdRef = useRef<string | null>(null);
+
+    const fetchProfile = useCallback(async (force = false) => {
+        if (!user) {
+            setProfile(null);
+            setLoading(false);
+            lastFetchedUserIdRef.current = null;
+            return;
+        }
+
+        if (!force && lastFetchedUserIdRef.current === user.id) {
+            return;
+        }
+
         try {
             setLoading(true);
             const data = await apiClient.get<UserProfile>("/api/users/me");
             setProfile(data);
+            lastFetchedUserIdRef.current = user.id;
         } catch (error) {
             console.error("[useProfile] Failed to fetch profile:", error);
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [user?.id]);
 
     const updateProfile = useCallback(async (data: UpdateProfileData) => {
         try {

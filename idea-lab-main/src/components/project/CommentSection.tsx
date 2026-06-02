@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MessageCircle, Send, Loader2 } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
 
 interface Comment {
     id: string;
@@ -14,48 +15,81 @@ interface CommentSectionProps {
     projectId: string;
 }
 
-const STORAGE_KEY_PREFIX = "blog_comments_";
-
 const CommentSection = ({ projectId }: CommentSectionProps) => {
-    const storageKey = `${STORAGE_KEY_PREFIX}${projectId}`;
     const [comments, setComments] = useState<Comment[]>([]);
     const [name, setName] = useState("");
     const [text, setText] = useState("");
     const [submitting, setSubmitting] = useState(false);
 
-    // Load comments from localStorage
-    useEffect(() => {
+    // Fetch comments and subscribe to changes
+    const fetchComments = async () => {
         try {
-            const stored = localStorage.getItem(storageKey);
-            if (stored) {
-                setComments(JSON.parse(stored));
-            }
-        } catch {
-            // Ignore parse errors
-        }
-    }, [storageKey]);
+            const { data, error } = await (supabase as any)
+                .from('blog_comments')
+                .select('*')
+                .eq('project_id', projectId)
+                .order('created_at', { ascending: false });
 
-    // Save comments to localStorage
-    const saveComments = (updated: Comment[]) => {
-        setComments(updated);
-        localStorage.setItem(storageKey, JSON.stringify(updated));
+            if (data && !error) {
+                setComments(data.map((row: any) => ({
+                    id: row.id,
+                    name: row.name,
+                    text: row.text,
+                    timestamp: row.created_at
+                })));
+            }
+        } catch (err) {
+            console.error("Error fetching comments:", err);
+        }
     };
 
-    const handleSubmit = () => {
+    useEffect(() => {
+        fetchComments();
+
+        // Subscribe to real-time changes
+        const channel = supabase
+            .channel(`blog_comments_project_${projectId}`)
+            .on('postgres_changes', {
+                event: '*',
+                schema: 'public',
+                table: 'blog_comments',
+                filter: `project_id=eq.${projectId}`
+            }, (payload) => {
+                console.log("[CommentSection] Received real-time update:", payload);
+                fetchComments();
+            })
+            .subscribe((status) => {
+                console.log(`[CommentSection] Subscription status for project ${projectId}:`, status);
+            });
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [projectId]);
+
+    const handleSubmit = async () => {
         if (!name.trim() || !text.trim() || submitting) return;
         setSubmitting(true);
 
-        const newComment: Comment = {
-            id: Date.now().toString(),
-            name: name.trim(),
-            text: text.trim(),
-            timestamp: new Date().toISOString(),
-        };
+        try {
+            const { error } = await (supabase as any).from('blog_comments').insert({
+                project_id: projectId,
+                name: name.trim(),
+                text: text.trim()
+            });
 
-        const updated = [newComment, ...comments];
-        saveComments(updated);
-        setText("");
-        setSubmitting(false);
+            if (!error) {
+                setText("");
+                // Manually refetch to ensure visibility even if subscription is slow/fails
+                fetchComments();
+            } else {
+                console.error("Failed to post comment:", error);
+            }
+        } catch (err) {
+            console.error("Exception posting comment:", err);
+        } finally {
+            setSubmitting(false);
+        }
     };
 
     const formatTime = (iso: string) => {

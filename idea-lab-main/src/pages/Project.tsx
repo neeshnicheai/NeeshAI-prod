@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Link, useParams, useNavigate, useSearchParams } from "react-router-dom";
+import defaultChatbotAvatar from "@/assets/chatbot-avatar.png";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -67,6 +68,7 @@ import { useAudienceData } from "@/hooks/useAudienceData";
 import { useAuth } from "@/hooks/useAuth";
 import { useProfile } from "@/hooks/useProfile";
 import { toast } from "sonner";
+import { uploadFileToStorage, migrateBase64ToStorage, isBase64 } from "@/lib/storage";
 
 // Occupation colors for tags
 const occupationColors: Record<string, { bg: string; text: string }> = {
@@ -82,36 +84,6 @@ const occupationColors: Record<string, { bg: string; text: string }> = {
 const getOccupationColor = (occupation: string) => {
   return occupationColors[occupation] || occupationColors["default"];
 };
-
-// Mock responses - will be replaced with real data later
-const mockResponses = [
-  {
-    id: "1",
-    name: "Alex",
-    email: "Alex@gmail.com",
-    occupation: "Business Man",
-    feedback: "It is good",
-    avatar: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100&h=100&fit=crop&crop=face",
-  },
-  {
-    id: "2",
-    name: "Sarah Johnson",
-    email: "sarah.j@gmail.com",
-    occupation: "Marketing Manager",
-    feedback: "Very helpful tool for content creation",
-    avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&h=100&fit=crop&crop=face",
-  },
-  {
-    id: "3",
-    name: "Mike Chen",
-    email: "mike.chen@company.com",
-    occupation: "Content Writer",
-    feedback: "Saves me hours every week",
-    avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&h=100&fit=crop&crop=face",
-  },
-];
-
-// Mock notifications removed — now using real data from backend via NotificationTab
 
 const Project = () => {
   const { id } = useParams();
@@ -130,7 +102,7 @@ const Project = () => {
     if (tab === 'blog') return 'blog';
     return 'overview';
   });
-  // selectedQuestion state removed — handled inside NotificationTab/ClusterDetailModal
+  
   const [editingDocId, setEditingDocId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -146,18 +118,6 @@ const Project = () => {
   const [responseSearch, setResponseSearch] = useState("");
   const [occupationFilter, setOccupationFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-
-  // Notification badge count fetch
-  useEffect(() => {
-    if (id) fetchBadgeCount();
-  }, [id, fetchBadgeCount]);
-
-  // Fetch clusters for overview
-  useEffect(() => {
-    if (activeTab === "overview") {
-      fetchClusters();
-    }
-  }, [activeTab, fetchClusters]);
 
   const [sections, setSections] = useState<Array<{
     id: string;
@@ -185,18 +145,19 @@ const Project = () => {
     { id: "2", title: "Content", content: "", type: "text" },
   ]);
 
-  // Get unique occupations for filter
-  const uniqueOccupations = [...new Set(mockResponses.map((r: typeof mockResponses[0]) => r.occupation))];
-
-  // Filter responses
-  const filteredResponses = mockResponses.filter(response => {
+  // Filter responses (using real audience data)
+  const filteredResponses = audienceMembers.filter(member => {
+    if (!member.feedbackSummary) return false;
     const matchesSearch = responseSearch === "" ||
-      response.name.toLowerCase().includes(responseSearch.toLowerCase()) ||
-      response.email.toLowerCase().includes(responseSearch.toLowerCase()) ||
-      response.feedback.toLowerCase().includes(responseSearch.toLowerCase());
-    const matchesOccupation = occupationFilter === "all" || response.occupation === occupationFilter;
+      member.name.toLowerCase().includes(responseSearch.toLowerCase()) ||
+      member.email.toLowerCase().includes(responseSearch.toLowerCase()) ||
+      (member.feedbackSummary && member.feedbackSummary.toLowerCase().includes(responseSearch.toLowerCase()));
+    const matchesOccupation = occupationFilter === "all" || member.occupation === occupationFilter;
     return matchesSearch && matchesOccupation;
   });
+
+  // Get unique occupations for filter
+  const uniqueOccupations = [...new Set(audienceMembers.map(m => m.occupation).filter(Boolean))];
 
   // Notifications filtering/sorting now handled inside NotificationTab component
 
@@ -341,8 +302,8 @@ const Project = () => {
   };
 
   const handleSectionImageUpload = async (sectionId: string, file: File) => {
+    if (!id) return;
     console.log(`[SectionImage] Upload started for section ${sectionId}`);
-    console.log(`[SectionImage] File: ${file.name}, size: ${file.size}, type: ${file.type}`);
 
     if (!file.type.startsWith("image/")) {
       toast.error("Please upload a valid image file.");
@@ -353,90 +314,64 @@ const Project = () => {
       return;
     }
 
-    // Show a temporary blob URL immediately so the user sees the image right away
+    // Show a temporary blob URL immediately
     const tempUrl = URL.createObjectURL(file);
-    console.log(`[SectionImage] Created temp blob URL: ${tempUrl.substring(0, 50)}...`);
     setSections(prev => prev.map(s =>
       s.id === sectionId ? { ...s, imageUrl: tempUrl, content: file.name } : s
     ));
 
     try {
-      // Compress and convert to base64 for persistence
-      console.log(`[SectionImage] Starting compression...`);
+      // Compress then upload to Supabase Storage
       const { compressImage } = await import("@/lib/imageUtils");
       const compressed = await compressImage(file);
-      console.log(`[SectionImage] Compression done. Compressed size: ${compressed.size}`);
+      const storageUrl = await uploadFileToStorage(id, compressed, "image");
+      console.log(`[SectionImage] ✅ Uploaded to Storage: ${storageUrl}`);
 
-      const base64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = () => reject(new Error("Failed to read image"));
-        reader.readAsDataURL(compressed);
-      });
-      console.log(`[SectionImage] Base64 conversion done. Length: ${base64.length}, starts with: ${base64.substring(0, 50)}`);
-
-      // Replace temp blob URL with persistent base64
+      // Replace temp blob URL with persistent Storage URL
       URL.revokeObjectURL(tempUrl);
-      setSections(prev => {
-        const updated = prev.map(s =>
-          s.id === sectionId ? { ...s, imageUrl: base64, content: base64 } : s
-        );
-        console.log(`[SectionImage] ✅ Section updated with base64. Section found: ${updated.some(s => s.id === sectionId)}`);
-        return updated;
-      });
-      toast.success("Image added to section");
+      setSections(prev => prev.map(s =>
+        s.id === sectionId ? { ...s, imageUrl: storageUrl, content: storageUrl } : s
+      ));
+      toast.success("Image uploaded successfully");
     } catch (err) {
-      console.error("[SectionImage] ❌ Compression/conversion failed:", err);
-      // Keep the temp blob URL as fallback (will be lost on refresh)
-      toast.success("Image added (save now to persist it)");
+      console.error("[SectionImage] ❌ Upload failed:", err);
+      toast.error("Failed to upload image. Save to retry.");
     }
   };
 
   const handleSectionVideoUpload = async (sectionId: string, file: File) => {
+    if (!id) return;
     console.log(`[SectionVideo] Upload started for section ${sectionId}`);
-    console.log(`[SectionVideo] File: ${file.name}, size: ${file.size}, type: ${file.type}`);
 
     if (!file.type.startsWith("video/")) {
       toast.error("Please upload a valid video file.");
       return;
     }
-    if (file.size > 25 * 1024 * 1024) {
-      toast.error("Video too large. Please upload a video under 25MB.");
+    if (file.size > 100 * 1024 * 1024) {
+      toast.error("Video too large. Please upload a video under 100MB.");
       return;
     }
 
-    // Show a temporary blob URL immediately so the user sees the video right away
+    // Show a temporary blob URL immediately
     const tempUrl = URL.createObjectURL(file);
-    console.log(`[SectionVideo] Created temp blob URL`);
     setSections(prev => prev.map(s =>
       s.id === sectionId ? { ...s, videoUrl: tempUrl, content: file.name } : s
     ));
 
     try {
-      // Convert to base64 for persistence (no re-encoding, preserves quality)
-      console.log(`[SectionVideo] Starting base64 conversion...`);
-      const base64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = () => reject(new Error("Failed to read video"));
-        reader.readAsDataURL(file);
-      });
-      console.log(`[SectionVideo] Base64 conversion done. Length: ${base64.length}`);
+      // Upload directly to Supabase Storage (no base64 conversion)
+      const storageUrl = await uploadFileToStorage(id, file, "video");
+      console.log(`[SectionVideo] ✅ Uploaded to Storage: ${storageUrl}`);
 
-      // Replace temp blob URL with persistent base64
+      // Replace temp blob URL with persistent Storage URL
       URL.revokeObjectURL(tempUrl);
-      setSections(prev => {
-        const updated = prev.map(s =>
-          s.id === sectionId ? { ...s, videoUrl: base64, content: base64 } : s
-        );
-        console.log(`[SectionVideo] ✅ Section updated with base64.`);
-        return updated;
-      });
-      toast.success("Video added to section");
+      setSections(prev => prev.map(s =>
+        s.id === sectionId ? { ...s, videoUrl: storageUrl, content: storageUrl } : s
+      ));
+      toast.success("Video uploaded successfully");
     } catch (err) {
-      console.error("[SectionVideo] ❌ Conversion failed:", err);
-      // Keep the temp blob URL as fallback (will be lost on refresh)
-      toast.success("Video added (save now to persist it)");
+      console.error("[SectionVideo] ❌ Upload failed:", err);
+      toast.error("Failed to upload video. Save to retry.");
     }
   };
 
@@ -702,52 +637,62 @@ const Project = () => {
                       console.log("[Blog Save] Custom sections (including feedback):", customSections);
                       console.log("[Blog Save] Feedback sections:", customSections.filter(s => s.type === "feedback"));
 
-                      // Build custom_fields, preserving feedback form data
-                      const customFields = customSections.map((s, index) => {
-                        if (s.type === "feedback") {
-                          console.log("[Blog Save] ✅ Preserving feedback section:", s.feedbackTitle, "with", s.feedbackFields?.length, "fields");
+                      // Build custom_fields — migrate any remaining base64 to Storage URLs
+                      const customFields = await Promise.all(
+                        customSections.map(async (s, index) => {
+                          if (s.type === "feedback") {
+                            return {
+                              id: s.id,
+                              type: "feedback",
+                              title: s.feedbackTitle || s.title,
+                              description: s.feedbackDescription || s.content,
+                              fields: s.feedbackFields || [],
+                              order: index,
+                            };
+                          }
+                          if (s.type === "image") {
+                            const imgValue = s.imageUrl || s.content || "";
+                            // Migrate base64 to Storage if needed
+                            const finalUrl = isBase64(imgValue)
+                              ? await migrateBase64ToStorage(id, imgValue, "image")
+                              : imgValue;
+                            return {
+                              id: s.id,
+                              type: "image",
+                              value: finalUrl,
+                              order: index,
+                            };
+                          }
+                          if (s.type === "video") {
+                            const vidValue = s.videoUrl || s.content || "";
+                            // Migrate base64 to Storage if needed
+                            const finalUrl = isBase64(vidValue)
+                              ? await migrateBase64ToStorage(id, vidValue, "video")
+                              : vidValue;
+                            return {
+                              id: s.id,
+                              type: "video",
+                              value: finalUrl,
+                              order: index,
+                            };
+                          }
                           return {
                             id: s.id,
-                            type: "feedback",
-                            title: s.feedbackTitle || s.title,
-                            description: s.feedbackDescription || s.content,
-                            fields: s.feedbackFields || [],
+                            type: s.type,
+                            value: s.content,
                             order: index,
                           };
-                        }
-                        // Image sections: save the actual base64 data in `value`
-                        if (s.type === "image") {
-                          const imgValue = s.imageUrl || s.content || "";
-                          console.log(`[Blog Save] 🖼️ Image section ${s.id}: value length=${imgValue.length}, starts=${imgValue.substring(0, 40)}`);
-                          return {
-                            id: s.id,
-                            type: "image",
-                            value: imgValue,
-                            order: index,
-                          };
-                        }
-                        // Video sections: save the base64 data in `value`
-                        if (s.type === "video") {
-                          const vidValue = s.videoUrl || s.content || "";
-                          console.log(`[Blog Save] 🎬 Video section ${s.id}: value length=${vidValue.length}`);
-                          return {
-                            id: s.id,
-                            type: "video",
-                            value: vidValue,
-                            order: index,
-                          };
-                        }
-                        return {
-                          id: s.id,
-                          type: s.type,
-                          value: s.content,
-                          order: index,
-                        };
-                      });
+                        })
+                      );
+
+                      // Migrate cover image base64 to Storage URL if needed
+                      const finalCoverUrl = isBase64(coverImage || "")
+                        ? await migrateBase64ToStorage(id, coverImage, "cover")
+                        : (coverImage || undefined);
 
                       const blogData = {
                         heading: project?.title,
-                        cover_image_url: coverImage || undefined,
+                        cover_image_url: finalCoverUrl,
                         introduction: introSection?.content || "",
                         content: contentSection?.content || "",
                         custom_fields: customFields,
@@ -808,17 +753,10 @@ const Project = () => {
                 description: project.description || "",
                 status: project.status,
               }}
-              feedbackData={audienceMembers.length > 0
-                ? audienceMembers.map((m) => ({
-                  name: m.name,
-                  occupation: m.occupation || "Unknown",
-                  feedback: m.feedbackSummary || "",
-                }))
-                : []
-              }
               questionsData={clusters.slice(0, 5).map((q) => ({
                 question: q.canonicalQuestion,
                 count: q.totalAskCount,
+                answeredCount: q.status === "answered" ? q.totalAskCount : 0,
               }))}
               onDeleteProject={handleDeleteProject}
               isDeleting={isDeleting}
@@ -1023,11 +961,11 @@ const Project = () => {
                         className="hidden"
                       />
                       {section.imageUrl ? (
-                        <div className="relative rounded-xl overflow-hidden group">
+                        <div className="relative rounded-xl overflow-hidden group bg-muted/10 flex justify-center">
                           <img
                             src={section.imageUrl}
                             alt={section.title}
-                            className="w-full h-[200px] object-cover"
+                            className="max-w-full h-auto max-h-[400px] object-contain rounded-xl"
                           />
                           <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">
                             <label
@@ -1071,12 +1009,12 @@ const Project = () => {
                         className="hidden"
                       />
                       {section.videoUrl ? (
-                        <div className="relative rounded-xl overflow-hidden group">
+                        <div className="relative rounded-xl overflow-hidden group bg-black flex justify-center">
                           <video
                             src={section.videoUrl}
                             controls
                             preload="metadata"
-                            className="w-full max-h-[400px] rounded-xl bg-black"
+                            className="max-w-full h-auto max-h-[500px] object-contain rounded-xl"
                           />
                           <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-2">
                             <label
@@ -1102,7 +1040,7 @@ const Project = () => {
                         >
                           <Video className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
                           <p className="text-sm text-muted-foreground">
-                            Click to upload a video (max 25MB)
+                            Click to upload a video (max 100MB)
                           </p>
                         </label>
                       )}
@@ -1274,8 +1212,7 @@ const Project = () => {
               </div>
 
               {/* Document Library */}
-              {documents.length > 0 && (
-                <div className="bg-card rounded-2xl border border-border/30 p-6 shadow-card">
+              <div className="bg-card rounded-2xl border border-border/30 p-6 shadow-card">
                   <div className="flex items-center justify-between mb-6">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center">
@@ -1283,7 +1220,7 @@ const Project = () => {
                       </div>
                       <div>
                         <h3 className="font-display font-semibold text-lg">Knowledge Base Files</h3>
-                        <p className="text-sm text-muted-foreground">{documents.length} folders available</p>
+                        <p className="text-sm text-muted-foreground">{documents.length} files available</p>
                       </div>
                     </div>
                   </div>
@@ -1336,11 +1273,13 @@ const Project = () => {
 
                           <div className="flex flex-col gap-1 text-xs text-muted-foreground">
                             <div className="flex items-center gap-2">
-                              <span className="font-medium text-primary bg-primary/10 px-2 py-0.5 rounded text-[10px] uppercase">
-                                {doc.mime_type?.split('/')[1] || "FILE"}
+                              <span 
+                                className="font-medium text-primary bg-primary/10 px-2 py-0.5 rounded text-[10px] uppercase truncate max-w-[130px] inline-block"
+                                title={doc.mime_type || "FILE"}
+                              >
+                                {doc.mime_type?.includes('wordprocessingml') ? 'DOCX' : doc.mime_type?.split('/')[1] || "FILE"}
                               </span>
-                              <span>v{doc.version || 1}</span>
-
+                              <span className="flex-shrink-0">v{doc.version || 1}</span>
                             </div>
                             <div className="flex items-center gap-1.5 mt-1">
                               <Calendar className="w-3 h-3" />
@@ -1354,15 +1293,14 @@ const Project = () => {
                     ))}
                   </div>
                 </div>
-              )}
-            </div>
-          )}
+              </div>
+            )}
 
           {activeTab === "chatbot" && (
             <div className="max-w-4xl mx-auto">
               <div className="bg-card rounded-2xl border border-border/30 p-8 shadow-card text-center">
-                <div className="w-24 h-24 rounded-2xl bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center mx-auto mb-6">
-                  <Bot className="w-12 h-12 text-primary" />
+                <div className="w-32 h-32 flex items-center justify-center mx-auto mb-6">
+                  <img src={defaultChatbotAvatar} alt="Chatbot" className="w-full h-full object-contain drop-shadow-md" />
                 </div>
                 <h2 className="font-display font-semibold text-2xl mb-3">Test Your Chatbot</h2>
                 <p className="text-muted-foreground mb-6 max-w-md mx-auto">

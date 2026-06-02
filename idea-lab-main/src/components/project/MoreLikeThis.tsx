@@ -1,5 +1,5 @@
 import { useSimilarBlogs, type SimilarBlog } from "@/hooks/usePromotions";
-import { ChevronDown, ChevronLeft, ChevronRight, Tag, Sparkles } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
 import { useRef, useState } from "react";
 
 interface MoreLikeThisProps {
@@ -11,7 +11,7 @@ const MoreLikeThis = ({ projectId }: MoreLikeThisProps) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(true);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
 
   const handleScroll = () => {
     if (!scrollRef.current) return;
@@ -126,7 +126,7 @@ const MoreLikeThis = ({ projectId }: MoreLikeThisProps) => {
                         />
                       ) : (
                         <div className="w-full h-full flex items-center justify-center">
-                          <Tag className="w-8 h-8 text-muted-foreground/30" />
+                          <Sparkles className="w-8 h-8 text-muted-foreground/30" />
                         </div>
                       )}
                       <div className="absolute inset-0 bg-gradient-to-t from-card/80 to-transparent" />
@@ -143,28 +143,11 @@ const MoreLikeThis = ({ projectId }: MoreLikeThisProps) => {
                         </p>
                       )}
 
-                      {/* Author & Tags */}
+                      {/* Author display */}
                       <div className="flex items-center justify-between">
                         <span className="text-xs text-muted-foreground">
                           by {blog.authorName}
                         </span>
-                        {blog.matchingTags.length > 0 && (
-                          <div className="flex items-center gap-1">
-                            {blog.matchingTags.slice(0, 2).map((tag) => (
-                              <span
-                                key={tag}
-                                className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium"
-                              >
-                                {tag}
-                              </span>
-                            ))}
-                            {blog.matchingTags.length > 2 && (
-                              <span className="text-[10px] text-muted-foreground">
-                                +{blog.matchingTags.length - 2}
-                              </span>
-                            )}
-                          </div>
-                        )}
                       </div>
                     </div>
                   </a>

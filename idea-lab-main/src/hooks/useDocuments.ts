@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "./useAuth";
 import { toast } from "sonner";
+import apiClient from "@/lib/api";
 
 export interface Document {
   id: string;
@@ -35,15 +36,8 @@ export const useDocuments = (projectId: string | undefined) => {
       setLoading(true);
       setError(null);
 
-      const { data, error: fetchError } = await supabase
-        .from("documents")
-        .select("*")
-        .eq("project_id", projectId)
-        .eq("is_active", true)
-        .order("created_at", { ascending: false });
-
-      if (fetchError) throw fetchError;
-      setDocuments((data as Document[]) || []);
+      const data = await apiClient.get<Document[]>(`/api/documents/project/${projectId}`);
+      setDocuments(data || []);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to fetch documents";
       setError(message);
@@ -65,28 +59,7 @@ export const useDocuments = (projectId: string | undefined) => {
 
     try {
       setUploading(true);
-
-      const session = await supabase.auth.getSession();
-      const token = session.data?.session?.access_token;
-      const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:8081";
-
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const response = await fetch(`${backendUrl}/api/documents/project/${projectId}`, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${token}`
-        },
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(errorText || "Failed to upload document");
-      }
-
-      const newDoc: Document = await response.json();
+      const newDoc = await apiClient.uploadFile<Document>(`/api/documents/project/${projectId}`, file);
 
       setDocuments(prev => [newDoc, ...prev]);
       toast.success("Document uploaded successfully!");
@@ -109,9 +82,12 @@ export const useDocuments = (projectId: string | undefined) => {
 
     try {
       setUploading(true);
-
-      const session = await supabase.auth.getSession();
-      const token = session.data?.session?.access_token;
+      
+      // apiClient doesn't have a built-in 'putFile', but we can use post with a custom header or just extend apiClient
+      // Actually, let's use the existing uploadFile logic but with PUT since backend expects PUT for replace
+      // I'll quickly check if I can add a put variant to uploadFile or just use fetch with safeGetSession
+      const session = await apiClient.safeGetSession();
+      const token = session?.access_token;
       const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:8081";
 
       const formData = new FormData();
@@ -119,9 +95,7 @@ export const useDocuments = (projectId: string | undefined) => {
 
       const response = await fetch(`${backendUrl}/api/documents/${documentId}/replace`, {
         method: "PUT",
-        headers: {
-          "Authorization": `Bearer ${token}`
-        },
+        headers: { "Authorization": `Bearer ${token}` },
         body: formData,
       });
 
@@ -205,21 +179,7 @@ export const useDocuments = (projectId: string | undefined) => {
 
     try {
       // Call the backend refresh endpoint
-      const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:8081";
-      const session = await supabase.auth.getSession();
-      const token = session.data?.session?.access_token;
-
-      const response = await fetch(`${backendUrl}/api/documents/project/${projectId}/refresh`, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to refresh knowledge base: ${response.status}`);
-      }
+      await apiClient.post(`/api/documents/project/${projectId}/refresh`, {});
 
       // Re-fetch documents to ensure we have the latest data
       await fetchDocuments();

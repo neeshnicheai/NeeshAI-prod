@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useAuth } from "./useAuth";
 import apiClient from "@/lib/api";
 
@@ -17,17 +17,31 @@ export const useSubscription = () => {
   const [subscription, setSubscription] = useState<SubscriptionInfo | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchSubscription = useCallback(async () => {
+  // Guard against duplicate fetches
+  const lastFetchedUserIdRef = useRef<string | null>(null);
+  const isFetchingRef = useRef(false);
+
+  const fetchSubscription = useCallback(async (force = false) => {
     if (!user) {
       setSubscription(null);
       setLoading(false);
+      lastFetchedUserIdRef.current = null;
       return;
     }
+
+    // Skip if already fetched for this user
+    if (!force && lastFetchedUserIdRef.current === user.id) {
+      return;
+    }
+
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
 
     try {
       setLoading(true);
       const data = await apiClient.get<SubscriptionInfo>('/api/users/subscription');
       setSubscription(data);
+      lastFetchedUserIdRef.current = user.id;
     } catch (err) {
       console.error("[useSubscription] Error fetching subscription:", err);
       // Default to free plan on error
@@ -42,6 +56,7 @@ export const useSubscription = () => {
       });
     } finally {
       setLoading(false);
+      isFetchingRef.current = false;
     }
   }, [user?.id]);
 

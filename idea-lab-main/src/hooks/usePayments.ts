@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useToast } from "@/components/ui/use-toast";
-import { supabase } from "@/integrations/supabase/client";
+import apiClient from "@/lib/api";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 declare global {
@@ -16,7 +16,7 @@ export const usePayments = () => {
   const { toast } = useToast();
 
   const getToken = async (): Promise<string | null> => {
-    const { data: { session } } = await supabase.auth.getSession();
+    const session = await apiClient.safeGetSession();
     return session?.access_token || null;
   };
 
@@ -36,21 +36,7 @@ export const usePayments = () => {
       const body: Record<string, any> = { amount };
       if (couponCode) body.couponCode = couponCode;
 
-      const response = await fetch(`${BACKEND_URL}/api/payments/create-order`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
-        },
-        body: JSON.stringify(body)
-      });
-
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.error || "Failed to create order");
-      }
-
-      const data = await response.json();
+      const data = await apiClient.post<any>('/api/payments/create-order', body);
       return data;
     } catch (error: any) {
       toast({
@@ -66,21 +52,7 @@ export const usePayments = () => {
 
   const verifyPayment = async (orderId: string) => {
     try {
-      const token = await getToken();
-      if (!token) return null;
-
-      const response = await fetch(`${BACKEND_URL}/api/payments/verify-status`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
-        },
-        body: JSON.stringify({ order_id: orderId })
-      });
-
-      if (!response.ok) throw new Error("Failed to verify payment");
-
-      const data = await response.json();
+      const data = await apiClient.post<any>('/api/payments/verify-status', { order_id: orderId });
       return data;
     } catch (error: any) {
       console.error("Verification error:", error);
@@ -137,34 +109,18 @@ export const usePaymentVerification = () => {
     const verify = async () => {
       setVerifying(true);
       try {
-        const token = await (async () => {
-          const { data: { session } } = await supabase.auth.getSession();
-          return session?.access_token || null;
-        })();
-        if (!token) return;
-
-        const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/api/payments/verify-status`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`
-          },
-          body: JSON.stringify({ order_id: orderId })
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          if (data.status === "SUCCESS") {
-            toast({
-              title: "🎉 Payment Successful!",
-              description: "You've been upgraded to Pro. Enjoy unlimited projects and promotion access!",
-            });
-          } else {
-            toast({
-              title: "Payment Pending",
-              description: "Your payment is being processed. Please check back shortly.",
-            });
-          }
+        const data = await apiClient.post<any>('/api/payments/verify-status', { order_id: orderId });
+        
+        if (data.status === "SUCCESS") {
+          toast({
+            title: "🎉 Payment Successful!",
+            description: "You've been upgraded to Pro. Enjoy unlimited projects and promotion access!",
+          });
+        } else {
+          toast({
+            title: "Payment Pending",
+            description: "Your payment is being processed. Please check back shortly.",
+          });
         }
       } catch (err) {
         console.error("Payment verification error:", err);

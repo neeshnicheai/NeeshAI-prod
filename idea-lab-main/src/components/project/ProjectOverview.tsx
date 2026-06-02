@@ -41,14 +41,10 @@ interface ProjectOverviewProps {
     description?: string;
     status: string;
   };
-  feedbackData: Array<{
-    name: string;
-    occupation: string;
-    feedback: string;
-  }>;
   questionsData: Array<{
     question: string;
     count: number;
+    answeredCount?: number;
   }>;
   onDeleteProject?: () => void;
   isDeleting?: boolean;
@@ -80,18 +76,27 @@ function computeHealthScores(
   totalQuestions: number,
   unansweredCount: number
 ) {
-  const clarityIndex = Math.min(100, feedbackCount * 12);
-  const marketSignal = Math.min(100, uniqueOccupations * 20);
-  const gapVelocity = Math.max(0, 100 - unansweredCount * 15);
-  const validationMomentum = Math.round((clarityIndex + marketSignal + gapVelocity) / 3);
+  // Clarity Index: Feedback volume relative to base targets
+  const clarityIndex = Math.min(100, Math.round((feedbackCount / 10) * 100));
+  
+  // Market Signal: Diversity of audience
+  const marketSignal = Math.min(100, Math.round((uniqueOccupations / 5) * 100));
+  
+  // Gap Velocity: How well current questions are being addressed (inverse of unresolved gaps)
+  const gapVelocity = totalQuestions > 0 
+    ? Math.max(0, 100 - (unansweredCount * 10)) 
+    : 100;
+    
+  // Validation Momentum: Combined weighted average
+  const validationMomentum = Math.round((clarityIndex * 0.4 + marketSignal * 0.4 + gapVelocity * 0.2));
 
   return { clarityIndex, marketSignal, gapVelocity, validationMomentum };
 }
 
-function computeGaps(questionsData: Array<{ question: string; count: number }>) {
-  // Each question cluster with count > 1 is an active gap
+function computeGaps(questionsData: Array<{ question: string; count: number; answeredCount?: number }>) {
+  // Each question cluster that hasn't been fully addressed (answeredCount < totalCount)
   return questionsData
-    .filter(q => q.count > 1)
+    .filter(q => (q.answeredCount || 0) < q.count)
     .map((q, i) => ({
       id: `gap-${i}`,
       topic: q.question,
@@ -130,43 +135,38 @@ function computeSummary(
   const nextSteps: string[] = [];
 
   // Build strengths
-  if (feedbackCount > 0) strengths.push(`${feedbackCount} feedback response${feedbackCount > 1 ? "s" : ""} received from your audience`);
-  if (uniqueOccupations >= 3) strengths.push(`Diverse audience spanning ${uniqueOccupations} different occupations`);
-  if (totalQuestions > 0) strengths.push(`${totalQuestions} question${totalQuestions > 1 ? "s" : ""} asked — users are actively engaging`);
-  if (strengths.length === 0) strengths.push("Project is set up and ready to receive feedback");
+  if (feedbackCount > 0) strengths.push(`${feedbackCount} feedback response${feedbackCount > 1 ? "s" : ""} received`);
+  if (uniqueOccupations >= 3) strengths.push(`Engaging ${uniqueOccupations} different audience personas`);
+  if (totalQuestions > 0) strengths.push(`${totalQuestions} audience question${totalQuestions > 1 ? "s" : ""} captured`);
+  if (strengths.length === 0) strengths.push("Project is active and ready for audience validation");
 
   // Build opportunities
-  if (feedbackCount === 0) opportunities.push("Share your blog link to start collecting feedback");
-  if (totalQuestions === 0) opportunities.push("Encourage visitors to ask questions via the chatbot");
-  if (uniqueOccupations < 3) opportunities.push("Reach out to more diverse audiences for broader validation");
-  if (totalQuestions > 5) opportunities.push("Review frequently asked questions and update your knowledge base");
+  if (feedbackCount < 5) opportunities.push("Drive more traffic to reach 5+ feedback responses");
+  if (totalQuestions === 0) opportunities.push("Enable Chatbot to capture audience questions");
+  if (uniqueOccupations < 3) opportunities.push("Target diverse personas for broader validation");
 
   // Build next steps
   if (validationStage === "early") {
-    nextSteps.push("Share your public blog link with potential users");
-    nextSteps.push("Upload documents to your knowledge base to power the chatbot");
+    nextSteps.push("Share your blog link to start collecting insights");
+    nextSteps.push("Enrich Knowledge Base to prepare for audience queries");
   } else if (validationStage === "gathering") {
-    nextSteps.push("Review incoming feedback and identify common themes");
-    nextSteps.push("Address frequently asked questions in your knowledge base");
-  } else if (validationStage === "detecting") {
-    nextSteps.push("Focus on knowledge gaps — many questions indicate areas needing more content");
-    nextSteps.push("Analyze persona-specific feedback patterns");
+    nextSteps.push("Review feedback themes to identify pattern markers");
+    nextSteps.push("Address repeated questions in the Knowledge Base");
   } else {
-    nextSteps.push("Iterate on your idea based on validated insights");
-    nextSteps.push("Consider expanding your audience reach for further validation");
+    nextSteps.push("Review Gap Detection to iterate on your value proposition");
+    nextSteps.push("Examine persona-specific matrix to refine messaging");
   }
 
   const stageText: Record<ValidationStage, string> = {
-    early: "Your project is in early stages. Share your blog link to start gathering audience insights.",
-    gathering: "Feedback is starting to come in! Your idea is generating initial interest from your audience.",
-    detecting: "Patterns are emerging in your audience engagement. Review the gaps detected below for actionable insights.",
-    refining: "Strong validation signal! Your audience is actively engaging and providing meaningful feedback.",
-    validated: "Excellent validation! Your idea has significant traction with a diverse, engaged audience.",
+    early: "Early validation stage. Start sharing to see real-time signals.",
+    gathering: "Initial pulse detected! Audience interaction is beginning to flow.",
+    detecting: "Patterns are emerging. Review the identified knowledge gaps.",
+    refining: "High signal project! Feedback and questions are showing strong alignment.",
+    validated: "High confidence validation! Your audience has clearly signaled product-market fit.",
   };
 
-  // Build summary: project description + validation status
   const descText = (projectSummary && projectSummary.trim()) || (projectDescription && projectDescription.trim()) || "";
-  const descriptionPart = descText ? descText.slice(0, 200) + " — " : "";
+  const descriptionPart = descText ? descText.slice(0, 150) + "... " : "";
 
   return {
     summary: descriptionPart + stageText[validationStage],
@@ -178,7 +178,7 @@ function computeSummary(
 
 // ===== Component =====
 
-const ProjectOverview = ({ projectId, projectData, feedbackData, questionsData, onDeleteProject, isDeleting }: ProjectOverviewProps) => {
+const ProjectOverview = ({ projectId, projectData, questionsData, onDeleteProject, isDeleting }: ProjectOverviewProps) => {
   const navigate = useNavigate();
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
@@ -188,7 +188,6 @@ const ProjectOverview = ({ projectId, projectData, feedbackData, questionsData, 
     loading: audienceLoading,
     stats: audienceStats,
     getAggregatedPersonaData,
-    refetch,
   } = useAudienceData(projectId);
 
   // Project links
@@ -197,11 +196,11 @@ const ProjectOverview = ({ projectId, projectData, feedbackData, questionsData, 
 
   // ===== Compute all analytics locally from real data =====
 
-  const totalFeedback = audienceStats.totalFeedback + feedbackData.length;
+  const totalFeedback = audienceStats.totalFeedback;
   const totalQuestions = questionsData.reduce((sum, q) => sum + q.count, 0);
-  const unansweredQuestions = questionsData.filter(q => q.count >= 2).length;
-  const uniqueOccupations = audienceStats.uniqueOccupations || new Set(feedbackData.map(f => f.occupation).filter(Boolean)).size;
-  const totalInteractions = totalFeedback + totalQuestions;
+  const unansweredQuestions = questionsData.filter(q => (q.answeredCount || 0) < q.count).length;
+  const uniqueOccupations = audienceStats.uniqueOccupations;
+  const totalInteractions = audienceStats.totalMembers + totalQuestions;
 
   const validationStage = useMemo(() => computeValidationStage(totalInteractions), [totalInteractions]);
   const healthScores = useMemo(
@@ -222,33 +221,18 @@ const ProjectOverview = ({ projectId, projectData, feedbackData, questionsData, 
       return aggregatedPersonas.map(p => ({
         persona: p.persona as PersonaType,
         visited: p.members,
-        asked: 0, // Real question counts not tracked per persona yet
+        asked: 0, // Injected via clusters mapping when available
         feedback: p.feedbackCount,
-        returned: 0, // Return visits not tracked yet
+        returned: 0,
       }));
     }
-    // Fallback: derive from feedbackData props
-    const personaCounts: Record<string, { visited: number; feedback: number }> = {};
-    feedbackData.forEach(f => {
-      const persona = f.occupation?.toLowerCase() || "other";
-      if (!personaCounts[persona]) personaCounts[persona] = { visited: 0, feedback: 0 };
-      personaCounts[persona].visited++;
-      personaCounts[persona].feedback++;
-    });
-    return Object.entries(personaCounts).map(([persona, data]) => ({
-      persona: persona as PersonaType,
-      visited: data.visited,
-      asked: 0,
-      feedback: data.feedback,
-      returned: 0,
-    }));
-  }, [aggregatedPersonas, feedbackData]);
+    return [];
+  }, [aggregatedPersonas]);
 
   // Timeline events (from real data when available)
   const timelineEvents = useMemo((): TimelineEvent[] => {
     const events: TimelineEvent[] = [];
     if (audienceMembers.length > 0) {
-      // Find earliest interaction
       const earliest = audienceMembers.reduce((min, m) =>
         m.first_interaction_at < min ? m.first_interaction_at : min,
         audienceMembers[0].first_interaction_at
@@ -256,18 +240,18 @@ const ProjectOverview = ({ projectId, projectData, feedbackData, questionsData, 
       events.push({
         id: "first-interaction",
         type: "knowledge_update",
-        title: "First audience interaction",
-        description: `First visitor engaged with your project`,
+        title: "Validation Loop Started",
+        description: "Your first audience member interacted with the blog",
         timestamp: new Date(earliest),
       });
     }
     if (totalFeedback > 0) {
       events.push({
-        id: "first-feedback",
+        id: "feedback-milestone",
         type: "blog_update",
-        title: `${totalFeedback} feedback responses received`,
-        description: `Audience is actively providing feedback on your idea`,
-        timestamp: new Date(Date.now() - 24 * 60 * 60 * 1000),
+        title: `${totalFeedback} feedback points`,
+        description: "Reached a new milestone of audience feedback",
+        timestamp: new Date(),
       });
     }
     return events;
@@ -282,7 +266,7 @@ const ProjectOverview = ({ projectId, projectData, feedbackData, questionsData, 
       );
       return new Date(latest);
     }
-    return null; // No interactions yet — don't fake a date
+    return null;
   }, [audienceMembers]);
 
   // ===== Handlers =====
@@ -379,7 +363,7 @@ const ProjectOverview = ({ projectId, projectData, feedbackData, questionsData, 
 
         {/* Validation Ring */}
         <ValidationRing
-          visitors={audienceStats.totalMembers || feedbackData.length}
+          visitors={audienceStats.totalMembers}
           questions={totalQuestions}
           feedback={totalFeedback}
           gaps={activeGaps.length}
