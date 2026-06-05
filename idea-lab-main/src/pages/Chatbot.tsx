@@ -497,7 +497,7 @@ const Chatbot = () => {
                 onKeyDown={(e) => e.key === "Enter" && !isLoading && handleSendMessage()}
                 disabled={isLoading}
               />
-              <Button onClick={handleSendMessage} className="rounded-xl px-6" disabled={isLoading}>
+              <Button onClick={() => handleSendMessage()} className="rounded-xl px-6" disabled={isLoading}>
                 {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
               </Button>
             </div>
