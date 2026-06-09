@@ -169,11 +169,48 @@ export const useBlogs = () => {
     }
   };
 
+  const getPublicBlogBySlug = async (slug: string): Promise<Blog | null> => {
+    try {
+      console.log(`[useBlogs] Fetching public blog by slug: ${slug}`);
+      const backendData = await apiClient.get<BackendBlogContent>(`/api/public/projects/blog/${slug}`, {
+        skipAuth: true });
+
+      // Extract project ID from slug for transformation
+      const projectId = extractProjectIdFromSlug(slug);
+      if (!projectId) {
+        throw new Error("Invalid slug format");
+      }
+
+      return transformBlog(projectId, backendData);
+    } catch (err) {
+      console.error("[useBlogs] Error fetching public blog by slug:", err);
+      return null;
+    }
+  };
+
+  const extractProjectIdFromSlug = (slug: string): string | null => {
+    try {
+      // Expected format: "some-title-uuid"
+      // UUID format: 8-4-4-4-12 hex characters
+      const uuidPattern = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+      const match = slug.match(uuidPattern);
+
+      if (match && match[1]) {
+        return match[1];
+      }
+      return null;
+    } catch (e) {
+      console.error("Failed to extract UUID from slug:", slug, e);
+      return null;
+    }
+  };
+
   return {
     loading,
     error,
     getBlog,
     upsertBlog,
     getPublicBlog,
+    getPublicBlogBySlug,
   };
 };

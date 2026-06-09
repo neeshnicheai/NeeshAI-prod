@@ -61,6 +61,39 @@ public class PublicProjectController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
+    @GetMapping("/blog/{slug}")
+    public ResponseEntity<BlogDTOs.BlogContentDTO> getPublicBlogBySlug(@PathVariable String slug) {
+        // Parse slug to extract project ID
+        UUID projectId = extractProjectIdFromSlug(slug);
+        if (projectId == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        // Get blog content without owner verification for public access
+        return blogService.getBlogContent(projectId, null)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    private UUID extractProjectIdFromSlug(String slug) {
+        try {
+            // Expected format: "some-title-uuid"
+            // UUID format: 8-4-4-4-12 hex characters
+            String uuidPattern = "([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$";
+            java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(uuidPattern,
+                    java.util.regex.Pattern.CASE_INSENSITIVE);
+            java.util.regex.Matcher matcher = pattern.matcher(slug);
+
+            if (matcher.find()) {
+                return UUID.fromString(matcher.group(1));
+            }
+            return null;
+        } catch (Exception e) {
+            logger.warn("Failed to extract UUID from slug: {}", slug, e);
+            return null;
+        }
+    }
+
     @PostMapping("/{projectId}/feedback")
     public ResponseEntity<AudienceDTOs.PublicFeedbackResponse> submitFeedback(
             @PathVariable UUID projectId,
