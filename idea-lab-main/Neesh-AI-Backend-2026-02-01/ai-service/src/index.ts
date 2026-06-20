@@ -56,6 +56,31 @@ app.post('/api/projects/:id/chat', (req, res) => chatController.chatWithProject(
 // Public chat endpoint (no auth required)
 app.post('/api/public/projects/:id/chat', (req, res) => chatController.publicChatWithProject(req, res));
 
+// Blog API routes (authenticated)
+import { BlogController } from './controllers/BlogController';
+const blogController = new BlogController();
+
+app.get('/api/projects/:projectId/blog', (req, res) => blogController.getBlog(req, res));
+app.put('/api/projects/:projectId/blog', (req, res) => blogController.upsertBlog(req, res));
+
+// Public blog endpoint (no auth required)
+app.get('/api/public/projects/:projectId/blog', (req, res) => blogController.getPublicBlog(req, res));
+
+// Audience routes (authenticated)
+import { AudienceController } from './controllers/AudienceController';
+const audienceController = new AudienceController();
+
+app.get('/api/projects/:projectId/audience', (req, res) => audienceController.getAudience(req, res));
+app.post('/api/public/projects/:projectId/feedback', (req, res) => audienceController.submitPublicFeedback(req, res));
+
+// User / subscription routes (authenticated)
+import { UserController } from './controllers/UserController';
+const userController = new UserController();
+
+app.get('/api/users/subscription', (req, res) => userController.getSubscription(req, res));
+app.put('/api/users/subscription/upgrade', (req, res) => userController.upgradeToPro(req, res));
+app.put('/api/users/branding', (req, res) => userController.updateBranding(req, res));
+
 // API Key management routes
 import { ApiKeyController } from './controllers/ApiKeyController';
 const apiKeyController = new ApiKeyController();
@@ -63,6 +88,69 @@ const apiKeyController = new ApiKeyController();
 app.get('/api/user/api-keys', (req, res) => apiKeyController.getUserApiKeys(req, res));
 app.post('/api/user/api-keys', (req, res) => apiKeyController.saveApiKey(req, res));
 app.delete('/api/user/api-keys/:provider', (req, res) => apiKeyController.deleteApiKey(req, res));
+
+// Notifications stub routes (not yet implemented)
+app.get('/api/projects/:projectId/notifications', (req, res) => {
+    res.json({ clusters: [], count: 0, unansweredCount: 0 });
+});
+app.get('/api/projects/:projectId/notifications/count', (req, res) => {
+    res.json({ count: 0 });
+});
+app.get('/api/notifications/clusters/:clusterId', (req, res) => {
+    res.status(404).json({ error: 'Not found' });
+});
+app.post('/api/notifications/clusters/:clusterId/reply', (req, res) => {
+    res.json({ clusterId: req.params.clusterId, answeredCount: 0, totalCount: 0, clusterStatus: 'unanswered' });
+});
+
+// FAQ stub routes
+app.get('/api/projects/:projectId/faqs', (req, res) => {
+    res.json({ faqs: [], count: 0 });
+});
+app.post('/api/projects/:projectId/faqs', (req, res) => {
+    res.status(501).json({ error: 'Not implemented' });
+});
+app.put('/api/faqs/:faqId', (req, res) => {
+    res.status(501).json({ error: 'Not implemented' });
+});
+app.delete('/api/faqs/:faqId', (req, res) => {
+    res.json({ success: true });
+});
+
+// Questions stub routes
+app.get('/api/projects/:projectId/questions/unanswered', (req, res) => {
+    res.json({ questions: [], count: 0 });
+});
+app.put('/api/questions/:questionId/resolve', (req, res) => {
+    res.json({ success: true });
+});
+
+// Links stub routes
+app.get('/api/projects/:projectId/links', (req, res) => {
+    res.json([]);
+});
+app.post('/api/projects/:projectId/links', (req, res) => {
+    res.status(501).json({ error: 'Not implemented' });
+});
+app.delete('/api/projects/:projectId/links/:linkId', (req, res) => {
+    res.json({ success: true });
+});
+
+// Promotions stub routes
+app.get('/api/promotions', (req, res) => {
+    res.json([]);
+});
+app.post('/api/promotions', (req, res) => {
+    res.status(501).json({ error: 'Not implemented' });
+});
+app.delete('/api/promotions/:promotionId', (req, res) => {
+    res.json({ success: true });
+});
+
+// Blog branding stub route
+app.get('/api/public/blog-branding/:projectId', (req, res) => {
+    res.json({ botName: null, botAvatarUrl: null });
+});
 
 // Public health check endpoint
 app.get('/', (req, res) => {

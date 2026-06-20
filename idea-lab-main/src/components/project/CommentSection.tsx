@@ -1,8 +1,9 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MessageCircle, Send, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import apiClient from "@/lib/api";
 
 interface Comment {
     id: string;
@@ -18,6 +19,7 @@ interface CommentSectionProps {
 const CommentSection = ({ projectId }: CommentSectionProps) => {
     const [comments, setComments] = useState<Comment[]>([]);
     const [name, setName] = useState("");
+    const [email, setEmail] = useState("");
     const [text, setText] = useState("");
     const [submitting, setSubmitting] = useState(false);
 
@@ -79,8 +81,16 @@ const CommentSection = ({ projectId }: CommentSectionProps) => {
             });
 
             if (!error) {
+                // Also record this commenter as an audience member
+                const resolvedEmail = email.trim() ||
+                    `${name.trim().toLowerCase().replace(/\s+/g, '.')}.${Date.now()}@comment.anonymous`;
+                apiClient.post(`/api/public/projects/${projectId}/feedback`, {
+                    name: name.trim(),
+                    email: resolvedEmail,
+                    feedbackText: text.trim(),
+                }, { skipAuth: true }).catch(() => {});
+
                 setText("");
-                // Manually refetch to ensure visibility even if subscription is slow/fails
                 fetchComments();
             } else {
                 console.error("Failed to post comment:", error);
@@ -125,12 +135,21 @@ const CommentSection = ({ projectId }: CommentSectionProps) => {
 
                     {/* Comment Form */}
                     <div className="space-y-3 mb-8 p-4 bg-muted/30 rounded-2xl border border-border/30">
-                        <Input
-                            value={name}
-                            onChange={(e) => setName(e.target.value)}
-                            placeholder="Your name"
-                            className="bg-background"
-                        />
+                        <div className="flex gap-2">
+                            <Input
+                                value={name}
+                                onChange={(e) => setName(e.target.value)}
+                                placeholder="Your name *"
+                                className="bg-background"
+                            />
+                            <Input
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                placeholder="Email (optional)"
+                                type="email"
+                                className="bg-background"
+                            />
+                        </div>
                         <div className="flex gap-2">
                             <Input
                                 value={text}

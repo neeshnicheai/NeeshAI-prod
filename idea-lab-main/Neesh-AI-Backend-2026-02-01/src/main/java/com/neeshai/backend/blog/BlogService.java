@@ -45,8 +45,8 @@ public class BlogService {
 
         Optional<Blog> blogOpt = blogRepository.findByProjectId(projectId);
         if (blogOpt.isEmpty()) {
-            // Return empty blog content
-            return Optional.of(new BlogDTOs.BlogContentDTO("", "", "", "", List.of()));
+            return Optional.of(new BlogDTOs.BlogContentDTO(
+                    projectOpt.get().getTitle(), "", "", "", List.of()));
         }
 
         Blog blog = blogOpt.get();
@@ -54,8 +54,12 @@ public class BlogService {
 
         log.debug("Retrieved blog content with {} custom fields for project {}", customFields.size(), projectId);
 
+        String heading = (blog.getHeading() != null && !blog.getHeading().isBlank())
+                ? blog.getHeading()
+                : projectOpt.get().getTitle();
+
         return Optional.of(new BlogDTOs.BlogContentDTO(
-                blog.getHeading(),
+                heading,
                 blog.getCoverImageUrl(),
                 blog.getIntroduction(),
                 blog.getContent(),
