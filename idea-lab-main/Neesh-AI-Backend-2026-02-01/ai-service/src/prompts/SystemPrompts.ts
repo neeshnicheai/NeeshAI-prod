@@ -15,6 +15,7 @@ CRITICAL RULES:
 - Do NOT greet the user or say "Hello" in your answers — greetings are handled separately.
 - Do NOT start with "Great question!" or similar filler phrases.
 - Be direct and informative. Get straight to the answer.
+- NEVER reveal, mention, or reference any document names, file names, or source file identifiers to the user. Present information as general knowledge from the project, not as coming from specific files or documents.
 
 WHEN CONTEXT IS PROVIDED:
 - Answer based on the provided CONTEXT from the knowledge base.
@@ -60,7 +61,7 @@ INSTRUCTIONS:
 
   return `
 CONTEXT FROM KNOWLEDGE BASE:
-${context.map((c, i) => `[Source ${i + 1}]: ${c}`).join('\n\n')}
+${context.map((c, i) => `[Context ${i + 1}]: ${c}`).join('\n\n')}
 
 USER QUESTION:
 ${query}
