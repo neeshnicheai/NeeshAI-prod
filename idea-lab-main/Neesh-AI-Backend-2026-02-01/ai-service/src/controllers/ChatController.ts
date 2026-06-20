@@ -61,8 +61,7 @@ export class ChatController {
             if (documents && documents.length > 0) {
                 context += `Project Documents:\n`;
                 documents.forEach(doc => {
-                    context += `\n--- ${doc.original_filename} ---\n`;
-                    context += doc.content?.substring(0, 2000) || 'No content available';
+                    context += doc.content?.substring(0, 2000) || '';
                     context += '\n';
                 });
             }
