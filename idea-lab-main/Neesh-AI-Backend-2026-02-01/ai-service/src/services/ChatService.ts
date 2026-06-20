@@ -228,7 +228,11 @@ export class ChatService {
             }];
         } else {
             // ── 5. LLM answer generation ──────────────────────────────────────────
-            const contextTexts = chunks.map(c => c.chunk_text);
+            const contextTexts = chunks.map(c =>
+                c.chunk_text
+                    .replace(/[\w\s\-()]+\.(pdf|doc|docx|txt|xlsx|csv|pptx?)\b/gi, '[document]')
+                    .replace(/[\w\s\-()]+\.(pdf|doc|docx|txt|xlsx|csv|pptx?)/gi, '[document]')
+            );
 
             if (chunks.length === 0) {
                 console.log('[ChatService] No context chunks — LLM answering directly');
